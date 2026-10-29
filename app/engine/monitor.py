@@ -62,7 +62,7 @@ from ..platforms.channels import (parse_channels_feed, parse_channels_comment,
                    flatten_channels_comments, parse_self_user as parse_channels_self_user,
                    publish_channels)
 from ..platforms.tiktok import (TikTokNativeClient, parse_tiktok_aweme,
-                                parse_tiktok_comment)
+                                parse_tiktok_comment, tiktok_display_text)
 from ..platforms.tiktok.urls import profile_url as tiktok_profile_url
 from ..platforms.tiktok.urls import video_url as tiktok_video_url
 from ..models import (ContentRecord, CommentRecord, CommentRule, CommentTask,
@@ -1938,10 +1938,13 @@ class MonitorEngine:
                 target.last_error = error or ""
                 first_aweme = next((aw for _, aw, _ in new_records), None)
                 if first_aweme:
-                    target.nickname = target.nickname or first_aweme.author_name
+                    if not tiktok_display_text(target.nickname):
+                        target.nickname = (first_aweme.author_name
+                                           or f"@{unique_id}")
                     target.avatar = target.avatar or first_aweme.avatar
                 s.add(target)
-                target_name = target.nickname or (unique_id or "tiktok")
+                target_name = (tiktok_display_text(target.nickname)
+                               or (f"@{unique_id}" if unique_id else "tiktok"))
             s.commit()
             for rec, _, _ in new_records:
                 s.refresh(rec)

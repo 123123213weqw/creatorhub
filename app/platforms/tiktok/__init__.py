@@ -6,6 +6,7 @@ from .extract import (
     parse_tiktok_app_context,
     parse_tiktok_comment,
     parse_tiktok_user,
+    tiktok_display_text,
 )
 from .protocol import (
     API_CONTRACTS,
@@ -30,6 +31,7 @@ __all__ = [
     "parse_tiktok_app_context",
     "parse_tiktok_comment",
     "parse_tiktok_user",
+    "tiktok_display_text",
     "API_CONTRACTS",
     "SIGNATURE_FIELDS",
     "classify_tiktok_api",

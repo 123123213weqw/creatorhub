@@ -44,7 +44,8 @@ class Downloader:
         from ..browser.manager import normalize_proxy
         proxy = normalize_proxy(proxy)        # 裸 host:port 补 scheme(httpx 必须带)
         out_dir = self._target_dir(aweme.author_name, base_dir)
-        title = safe_title(aweme.desc) or aweme.aweme_id
+        title = (safe_title(aweme.desc)
+                 if str(aweme.desc or "").strip() else aweme.aweme_id)
         _pf = getattr(aweme, "platform", "douyin")
         platform_referer = (
             "https://www.xiaohongshu.com/" if _pf == "xhs" else

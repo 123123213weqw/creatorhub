@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+import unicodedata
 from typing import Optional
 
 from ..douyin.extract import Aweme, MediaItem
@@ -24,6 +25,16 @@ def _int(value) -> int:
         return int(float(value or 0))
     except (TypeError, ValueError):
         return 0
+
+
+def tiktok_display_text(value) -> str:
+    """Keep user-facing TikTok text only when it has visible characters."""
+    text = str(value or "").strip()
+    visible = "".join(
+        char for char in text
+        if not char.isspace() and not unicodedata.category(char).startswith("C")
+    )
+    return text if visible else ""
 
 
 def _url(value) -> str:
@@ -63,11 +74,14 @@ def parse_tiktok_aweme(raw: dict, quality: str = "highest") -> Optional[Aweme]:
         candidate = int(aweme_id) >> 32
         if 1_450_000_000 <= candidate <= int(time.time()) + 86400:
             create_time = candidate
+    nickname = tiktok_display_text(
+        _first(author, "nickname", "uniqueId", "unique_id", default=""))
     aweme = Aweme(
         aweme_id=aweme_id,
-        desc=str(_first(item, "desc", "description", default="") or "").strip(),
+        desc=tiktok_display_text(
+            _first(item, "desc", "description", default="")),
         create_time=create_time,
-        author_name=str(_first(author, "nickname", "uniqueId", "unique_id", default="") or ""),
+        author_name=nickname or (f"@{author_unique_id}" if author_unique_id else ""),
         media_type="video",
     )
     aweme.platform = "tiktok"

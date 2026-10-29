@@ -91,6 +91,7 @@ from .platforms.tiktok import (
     TikTokNativeClient,
     native_protocol_summary,
     parse_tiktok_app_context,
+    tiktok_display_text,
 )
 from .platforms.tiktok.urls import parse_profile_reference, parse_video_reference
 from .engine import Downloader, MonitorEngine
@@ -8886,10 +8887,14 @@ async def export_danmaku_report(
 
 
 def _target_dict(t: MonitorTarget) -> dict:
+    nickname = (tiktok_display_text(t.nickname)
+                if t.platform == "tiktok" else t.nickname)
+    if t.platform == "tiktok" and not nickname and t.sec_uid:
+        nickname = f"@{t.sec_uid}"
     return {
         "id": t.id, "platform": t.platform, "target_kind": t.target_kind,
         "keyword": t.keyword,
-        "sec_uid": t.sec_uid, "nickname": t.nickname, "avatar": t.avatar,
+        "sec_uid": t.sec_uid, "nickname": nickname, "avatar": t.avatar,
         "alias": t.alias, "group_name": t.group_name,
         "tags": _load_meta_tags(t.tags),
         "enabled": t.enabled, "interval_seconds": t.interval_seconds,
@@ -8917,8 +8922,12 @@ def _content_source(target_id: int, platform: str, target: MonitorTarget | None 
         return {"id": target_id, "name": f"已删除任务 #{target_id}" if target_id > 0 else "未关联任务",
                 "platform": platform, "deleted": target_id > 0, "target_kind": "",
                 "group_name": "", "tags": []}
+    nickname = (tiktok_display_text(target.nickname)
+                if platform == "tiktok" else target.nickname)
+    if platform == "tiktok" and not nickname and target.sec_uid:
+        nickname = f"@{target.sec_uid}"
     base = ("#" + target.keyword if target.target_kind == "keyword"
-            else target.nickname or target.sec_uid[:12] or f"任务 #{target.id}")
+            else nickname or target.sec_uid[:12] or f"任务 #{target.id}")
     name = f"{target.alias} · {base}" if target.alias and target.alias != base else base
     return {"id": target.id, "name": name, "platform": target.platform,
             "deleted": False, "target_kind": target.target_kind,

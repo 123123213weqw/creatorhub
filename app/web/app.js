@@ -6621,7 +6621,7 @@ async function refreshContents(resetPage = false) {
     return;
   }
   $("content-table").innerHTML = rows.map(r => {
-    const description = esc(r.desc || "(无描述)");
+    const description = esc(r.desc || "（未填写作品文案）");
     return `<tr>
       <td class="content-check-cell"><label class="content-selection" title="选择这条作品"><input type="checkbox" data-id="${r.id}" aria-label="选择这条作品" onchange="contentToggleOne(${r.id}, this.checked)" ${selContent.has(r.id) ? "checked" : ""}></label></td>
       <td class="content-cover-cell">${r.cover_url ? `<img class="thumb" src="${esc(safeMediaUrl(r.cover_url))}" alt="封面" referrerpolicy="no-referrer" onclick="openPreview(${r.id})">` : `<span class="content-cover-empty">${ic(r.media_type === "images" ? "i-image" : "i-film")}</span>`}</td>
@@ -6631,7 +6631,7 @@ async function refreshContents(resetPage = false) {
       </td>
       <td class="content-type-cell"><span class="content-kind">${r.media_type === "images" ? "图集" : "视频"}</span>${r.quality ? `<span class="content-quality">${esc(r.quality)}</span>` : ""}</td>
       <td class="content-record-time"><span class="content-origin-label">抓取入库</span>${contentCapturedTime(r.captured_at)}<div class="content-published-time">发布 · ${fmtTime(r.create_time)}</div></td>
-      <td class="content-metrics num"><span class="metric like">${ic("i-heart")}${fmtNum(r.like_count)}</span>${r.duration ? `<span class="metric">${ic("i-clock")}${fmtDur(r.duration)}</span>` : ""}</td>
+      <td class="content-metrics num"><span class="metric like">${ic("i-heart")}${fmtNum(r.like_count)}</span><span class="metric">${ic("i-msg")}${fmtNum(r.comment_count)}</span>${r.duration ? `<span class="metric">${ic("i-clock")}${fmtDur(r.duration)}</span>` : ""}</td>
       <td class="content-action-cell">
         <div class="content-status-row"><span class="pill ${r.download_status}">${contentStatusLabel(r.download_status)}</span>${r.error ? `<span class="warn-ic" data-tip="${esc(r.error)}">${ic("i-info")}</span>` : ""}</div>
         <div class="content-action-buttons">
