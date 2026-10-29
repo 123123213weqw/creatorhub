@@ -7,6 +7,7 @@ only returned to in-process authentication code.
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
 from contextlib import suppress
 from dataclasses import dataclass
@@ -117,6 +118,134 @@ def try_proxy_plan(raw: str) -> Optional[ProxyPlan]:
         return ProxyPlan.parse(raw)
     except ProxyConfigError:
         return None
+
+
+class HttpProxyAuthRelay:
+    """Loopback HTTP proxy that authenticates to an upstream HTTP proxy.
+
+    Chromium occasionally omits credentials on the first request through an
+    authenticated HTTP proxy. The browser connects to this credential-free
+    loopback endpoint; the relay injects Proxy-Authorization deterministically
+    for CONNECT and ordinary absolute-form HTTP requests.
+    """
+
+    listen_host = "127.0.0.1"
+
+    def __init__(self, plan: ProxyPlan):
+        if plan.scheme not in {"http", "https"} or not plan.authenticated:
+            raise ProxyConfigError("本地 HTTP 转发器只接受认证 HTTP 代理")
+        self.plan = plan
+        self._server: asyncio.AbstractServer | None = None
+        self._port = 0
+        self._connections: set[asyncio.Task] = set()
+
+    @property
+    def port(self) -> int:
+        return self._port
+
+    @property
+    def chrome_server(self) -> str:
+        if not self._port:
+            raise ProxyConfigError("认证 HTTP 本地转发器尚未启动")
+        return f"http://{self.listen_host}:{self._port}"
+
+    @property
+    def active_connections(self) -> int:
+        return len(self._connections)
+
+    async def start(self) -> int:
+        if self._server is not None:
+            return self._port
+        self._server = await asyncio.start_server(
+            self._handle_client, self.listen_host, 0)
+        socket = self._server.sockets[0]
+        self._port = int(socket.getsockname()[1])
+        return self._port
+
+    async def close(self) -> None:
+        server, self._server = self._server, None
+        if server is not None:
+            server.close()
+            await server.wait_closed()
+        tasks = list(self._connections)
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        self._connections.clear()
+        self._port = 0
+
+    def _authorization(self) -> bytes:
+        token = base64.b64encode(
+            f"{self.plan.username}:{self.plan.password}".encode("utf-8"))
+        return b"Basic " + token
+
+    async def _handle_client(self, reader, writer) -> None:
+        task = asyncio.current_task()
+        if task is not None:
+            self._connections.add(task)
+        upstream_writer = None
+        try:
+            header = await asyncio.wait_for(
+                reader.readuntil(b"\r\n\r\n"), timeout=15)
+            first_line, *lines = header.split(b"\r\n")
+            parts = first_line.split(b" ", 2)
+            if len(parts) != 3:
+                return
+            filtered = [
+                line for line in lines
+                if line and not line.lower().startswith(b"proxy-authorization:")
+            ]
+            outbound = b"\r\n".join([
+                first_line,
+                *filtered,
+                b"Proxy-Authorization: " + self._authorization(),
+                b"",
+                b"",
+            ])
+            upstream_reader, upstream_writer = await asyncio.open_connection(
+                self.plan.host, self.plan.port,
+                ssl=(self.plan.scheme == "https"),
+                server_hostname=(self.plan.host if self.plan.scheme == "https" else None),
+            )
+            upstream_writer.write(outbound)
+            await upstream_writer.drain()
+            if parts[0].upper() == b"CONNECT":
+                response = await asyncio.wait_for(
+                    upstream_reader.readuntil(b"\r\n\r\n"), timeout=20)
+                writer.write(response)
+                await writer.drain()
+                status = response.split(b"\r\n", 1)[0].split(b" ", 2)
+                if len(status) < 2 or status[1] != b"200":
+                    return
+            downstream = asyncio.create_task(self._pipe(reader, upstream_writer))
+            upstream = asyncio.create_task(self._pipe(upstream_reader, writer))
+            done, pending = await asyncio.wait(
+                {downstream, upstream}, return_when=asyncio.FIRST_COMPLETED)
+            for pending_task in pending:
+                pending_task.cancel()
+            await asyncio.gather(*done, *pending, return_exceptions=True)
+        except asyncio.CancelledError:
+            raise
+        except (ConnectionError, OSError, asyncio.IncompleteReadError,
+                asyncio.LimitOverrunError, asyncio.TimeoutError):
+            pass
+        finally:
+            if upstream_writer is not None:
+                upstream_writer.close()
+                with suppress(Exception):
+                    await upstream_writer.wait_closed()
+            writer.close()
+            with suppress(Exception):
+                await writer.wait_closed()
+            if task is not None:
+                self._connections.discard(task)
+
+    @staticmethod
+    async def _pipe(reader, writer) -> None:
+        while data := await reader.read(65536):
+            writer.write(data)
+            await writer.drain()
 
 
 class Socks5AuthRelay:

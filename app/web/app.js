@@ -1041,7 +1041,7 @@ async function exportModuleReport(module, full = false, explicitBtn = null) {
 }
 
 let PLATFORM = "douyin";
-const PF_NAME = { douyin: "抖音", xhs: "小红书", kuaishou: "快手", shipinhao: "视频号" };
+const PF_NAME = { douyin: "抖音", xhs: "小红书", kuaishou: "快手", shipinhao: "视频号", tiktok: "TikTok" };
 let CURRENT_TAB = "overview";
 const PAGE_META = {
   overview: {
@@ -1066,7 +1066,10 @@ const PAGE_META = {
     title: "弹幕监控", desc: "监控短视频播放器内的弹幕，保留每条弹幕在视频中的时间点。"
   },
   hub: {
-    title: "我的内容", desc: "切换账号，查看作品、关注、粉丝与私信。"
+    title: "本账号管理", desc: "查看当前登录账号自己的作品、数据与账号维护入口。"
+  },
+  "tiktok-tools": {
+    title: "用户互动", desc: "搜索其他 TikTok 用户并创建关注、取关、私信、评论或回复任务。"
   },
   publish: {
     title: "内容发布", desc: "准备素材与文案，创建立即或定时发布任务。"
@@ -1101,7 +1104,7 @@ function pfHasPublish(pf) { return pf === "xhs" || pf === "kuaishou" || pf === "
 // 视频号只有「本账号」数据(助手接口本账号),不支持监控他人作品/评论
 function pfIsChannels(pf) { return pf === "shipinhao"; }
 function switchPlatform(pf) {
-  if (!["douyin", "xhs", "kuaishou", "shipinhao"].includes(pf)) pf = "douyin";
+  if (!["douyin", "xhs", "kuaishou", "shipinhao", "tiktok"].includes(pf)) pf = "douyin";
   globalThis.CreatorHubWorkbench?.platformChanging?.(pf);
   PLATFORM = pf;
   VIEW_REQUESTS.clear();
@@ -1143,6 +1146,7 @@ function applyPlatformUI() {
   document.body.classList.toggle("pf-xhs", PLATFORM === "xhs");
   document.body.classList.toggle("pf-kuaishou", PLATFORM === "kuaishou");
   document.body.classList.toggle("pf-shipinhao", PLATFORM === "shipinhao");
+  document.body.classList.toggle("pf-tiktok", PLATFORM === "tiktok");
   // 视频号:只有本账号数据,隐藏「监控他人作品/评论」相关入口(.notsh-only)
   document.body.classList.toggle("pf-channels", pfIsChannels(PLATFORM));
   if (PLATFORM !== "douyin" && CURRENT_TAB === "danmaku") switchTab("overview");
@@ -1156,9 +1160,11 @@ function applyPlatformUI() {
   document.querySelectorAll(".xhs-only").forEach(e => e.classList.toggle("hidden", PLATFORM !== "xhs"));
   document.querySelectorAll(".ks-only").forEach(e => e.classList.toggle("hidden", PLATFORM !== "kuaishou"));
   document.querySelectorAll(".sh-only").forEach(e => e.classList.toggle("hidden", PLATFORM !== "shipinhao"));
+  document.querySelectorAll(".tk-only").forEach(e => e.classList.toggle("hidden", PLATFORM !== "tiktok"));
+  document.querySelectorAll(".tk-hide").forEach(e => e.classList.toggle("hidden", PLATFORM === "tiktok"));
   document.querySelectorAll(".notsh-only").forEach(e => e.classList.toggle("hidden", pfIsChannels(PLATFORM)));
   document.querySelectorAll(".collect-only").forEach(e => e.classList.toggle(
-    "hidden", !["douyin", "xhs", "kuaishou", "shipinhao"].includes(PLATFORM)));
+    "hidden", !["douyin", "xhs", "kuaishou", "shipinhao", "tiktok"].includes(PLATFORM)));
   document.querySelectorAll(".meta-scope").forEach(e => {
     e.textContent = (PF_NAME[PLATFORM] || "当前平台") + "内独立";
   });
@@ -1223,7 +1229,10 @@ function applyPlatformUI() {
     // 视频号本账号只有「我的作品 / 数据」;若停在关注/粉丝/私信子页,切回我的作品
     if (["following", "fans", "dm"].includes(HUB_TAB)) switchHubTab("myworks");
   }
-  if (!["douyin", "xhs", "kuaishou", "shipinhao"].includes(PLATFORM) && CURRENT_TAB === "collections") switchTab("overview");
+  if (PLATFORM === "tiktok" && ["monitors", "comments", "autocomment"].includes(CURRENT_TAB)) switchTab("hub");
+  if (PLATFORM !== "tiktok" && CURRENT_TAB === "tiktok-tools") switchTab("accounts");
+  if (PLATFORM === "tiktok" && ["following", "fans", "dm"].includes(HUB_TAB)) switchHubTab("myworks");
+  if (!["douyin", "xhs", "kuaishou", "shipinhao", "tiktok"].includes(PLATFORM) && CURRENT_TAB === "collections") switchTab("overview");
   // 不支持发布的平台:若正停在该面板则回到总览(当前四平台均支持,兜底保留)
   if (!pfHasPublish(PLATFORM)) {
     const pub = document.querySelector('[data-panel="publish"]');
@@ -1464,6 +1473,7 @@ function switchTab(name, pushHistory = false) {
     refreshShareHistory();
   }
   if (name === "collections") { populateCollectionAccount(); refreshCollections(); }
+  if (name === "tiktok-tools") populateTikTokAccounts();
   if (name === "queue") refreshTaskQueue();
   if (name === "risk-control") refreshRiskCenter();
   if (changed && !["hub", "share-download", "collections", "queue", "risk-control"].includes(name)) loop();
@@ -1791,6 +1801,24 @@ async function startChannelsLogin() {
     $("qrstatus").innerHTML = `${ic("i-eye")} <b>视频号助手窗口已打开</b>，请使用微信扫码登录，读取和发布共用此登录态。<br>登录成功后请稍等片刻再关闭窗口。`;
     pollLogin(res.task_id);
   } catch (e) { $("qrstatus").textContent = "启动失败: " + e.message; toast("视频号登录启动失败:" + e.message, "err"); }
+}
+
+// ─── TikTok Web 登录（读取、采集和写操作共用） ───
+async function startTikTokLogin() {
+  const browserBackend = await choosePreLoginBrowserBackend({ platform: "tiktok" });
+  if (browserBackend === null) return;
+  const proxy = await choosePreLoginProxy();
+  if (proxy === null) return;
+  const fingerprint = await configurePreLoginFingerprint(browserBackend);
+  if (fingerprint === null) return;
+  $("cookiebox").style.display = "none";
+  $("qrbox").style.display = "block";
+  $("qrstatus").textContent = "正在打开 TikTok 窗口…";
+  try {
+    const res = await api(loginStartUrl("/api/login/tiktok/start", proxy, browserBackend), loginStartOptions(fingerprint));
+    $("qrstatus").innerHTML = `${ic("i-eye")} <b>TikTok Web 窗口已打开</b>，请在该窗口完成登录。<br>登录成功后，此账号 Profile 会用于页面动态签名、批量采集、关注、私信和评论。`;
+    pollLogin(res.task_id);
+  } catch (e) { $("qrstatus").textContent = "启动失败: " + e.message; toast("TikTok 登录启动失败:" + e.message, "err"); }
 }
 
 // ─── Cookie 登录 ───
@@ -2376,8 +2404,9 @@ async function refreshAccounts() {
     const isXhs = a.platform === "xhs";
     const isKs = a.platform === "kuaishou";
     const isChannels = a.platform === "shipinhao";
-    const idName = isXhs ? "小红书号 " : isKs ? "快手号 " : isChannels ? "视频号 " : "抖音号 ";
-    const secName = isChannels ? "finder_id " : isKs ? "主页ID " : isXhs ? "user_id " : "sec_uid ";
+    const isTikTok = a.platform === "tiktok";
+    const idName = isXhs ? "小红书号 " : isKs ? "快手号 " : isChannels ? "视频号 " : isTikTok ? "TikTok号 " : "抖音号 ";
+    const secName = isChannels ? "finder_id " : isKs ? "主页ID " : isXhs ? "user_id " : isTikTok ? "unique_id " : "sec_uid ";
     const rawSecUid = String(a.sec_uid || "");
     const shortSecUid = rawSecUid.length > 18 ? rawSecUid.slice(0, 18) + "…" : rawSecUid;
     const idline = [
@@ -2412,8 +2441,8 @@ async function refreshAccounts() {
           : `<span class="pill bare has-ic ic-text" title="仅监控/读取,未授权创作平台,不能发布">${ic("i-eye")}读取号</span>`)
       : `<span class="pill ${a.has_creator ? "active" : "bare"} has-ic ic-text" title="${a.has_creator ? "创作者登录,可用于创作中心评论模式,也可抓取" : "普通抓取账号"}">${a.has_creator ? ic("i-film") + "创作者号" : ic("i-card") + "抓取号"}</span>`;
     // 代理(风控隔离):有代理显示脱敏地址 + 状态;无代理高亮提醒(多账号同 IP 有关联风险)
-    const pxText = { ok: "代理正常", bad: "代理不可用", unknown: "代理未测" };
-    const pxCls = a.proxy_status === "ok" ? "active" : a.proxy_status === "bad" ? "invalid" : "bare";
+    const pxText = { ok: "代理正常", rotating: "代理正常（轮换出口）", drifted: "代理正常（出口已变化）", bad: "代理不可用", bound: "代理已绑定（待检测）", unknown: "代理已绑定（未检测）", auth_error: "代理认证失败", blocked: "代理被拦截" };
+    const pxCls = ["ok", "rotating", "drifted"].includes(a.proxy_status) ? "active" : ["bad", "auth_error", "blocked"].includes(a.proxy_status) ? "invalid" : "bare";
     const proxyLine = a.has_proxy
       ? `<div class="mut" style="font-size:11px;margin-top:2px">代理 <code>${esc(a.proxy)}</code> <span class="pill ${pxCls}">${pxText[a.proxy_status] || a.proxy_status}</span></div>`
       : `<div class="ic-text" style="font-size:11px;margin-top:2px;color:var(--warn)">${ic("i-info")}未配置代理(走本机真实 IP,多账号有关联风险)</div>`;
@@ -2448,7 +2477,7 @@ async function refreshAccounts() {
           <div>
             <button type="button" class="wb-account-name" data-account-detail="${a.id}" aria-haspopup="dialog">${esc(a.nickname || "未命名账号")}${ic("i-next")}</button>
             <div class="wb-account-meta">${idline || `账号 #${a.id}`} · ${a.monitor_count || 0} 个监控</div>
-            <div class="wb-account-pills">${pill}${!a.has_proxy ? '<span class="mut">本机网络</span>' : `<span class="pill ${pxCls}">${pxText[a.proxy_status] || "代理未测"}</span>`}</div>
+            <div class="wb-account-pills">${pill}${!a.has_proxy ? '<span class="mut">本机网络</span>' : `<span class="pill ${pxCls}">${pxText[a.proxy_status] || "代理状态未知"}</span>`}</div>
           </div>
         </div>
         <div data-account-info hidden><div class="wb-inspector-block"><h3>账号资料</h3><p>${idline}</p><p>${esc(detail)}</p></div>
@@ -2456,14 +2485,14 @@ async function refreshAccounts() {
       </td>
       <td><span class="pill ${a.status}">${accountStatusLabel}</span>${work.browser_open ? '<div class="mut" style="margin-top:6px"><span class="pill downloading">浏览器已打开</span></div>' : ""}${Number(task.total || 0) ? `<div class="mut" style="margin-top:6px">${Number(task.running || 0)} 执行中 · ${Number(task.blocked || 0)} 受阻 · ${Number(task.failed || 0)} 失败</div>` : ""}${work.unread_dm ? `<div class="mut" style="margin-top:4px">${Number(work.unread_dm)} 条未读私信</div>` : ""}</td>
       <td class="acttd wb-account-actions">
-        <button class="ghost sm" onclick="openAccountHub(${a.id})" title="查看该账号的作品 / 关注 / 粉丝 / 私信">我的内容</button>
+        <button class="ghost sm" onclick="openAccountHub(${a.id})" title="查看该账号自己的作品与数据">本账号管理</button>
         ${a.status === "invalid" ? reloginButton : `<button class="ghost sm" onclick="openAccountBrowser(${a.id})">打开浏览器</button>`}
         <span data-account-menu></span>
         <div data-account-actions>
         ${reloginButton}
         ${creatorLoginButton}
         <button class="ghost sm" onclick="refreshProfile(${a.id})">刷新资料</button>
-        <button class="ghost sm" onclick="openAccountHub(${a.id})" title="查看该账号的作品 / 关注 / 粉丝 / 私信">数据</button>
+        <button class="ghost sm" onclick="openAccountHub(${a.id})" title="查看该账号自己的作品与数据">本账号管理</button>
         <button class="ghost sm" onclick="openAccountBrowser(${a.id})" title="用该账号登录态弹出真实浏览器窗口,手动收发私信 / 维护 / 抓接口(关窗即保存)">打开浏览器</button>
         <button class="ghost sm" onclick="setBrowserBackend(${a.id})" title="选择本地 Chrome/Patchright 或开源 Fingerprint Chromium 内核">环境</button>
         <button class="ghost sm" onclick="manageFingerprint(${a.id})" title="根据账号当前出口 IP 生成稳定指纹、时区、语言和地理位置">指纹</button>
@@ -2491,8 +2520,158 @@ async function refreshAccounts() {
   populatePubAcc();
   populateAcAccount();
   populateHubAccounts();
+  populateTikTokAccounts();
   const at = document.querySelector('.navitem.active');
   if (at && at.dataset.tab === "hub") refreshHubPanel();
+}
+
+let TIKTOK_USERS = [];
+function populateTikTokAccounts() {
+  const accounts = ACCOUNTS.filter(a => a.platform === "tiktok" && a.status !== "invalid" && a.has_storage);
+  const options = accOptions(accounts, accounts.length ? "请选择 TikTok 账号" : "暂无可用 TikTok 账号");
+  for (const id of ["tk-account", "tk-comment-account"]) {
+    const select = $(id);
+    if (!select) continue;
+    const previous = select.value;
+    select.innerHTML = options;
+    if (accounts.some(account => String(account.id) === previous)) select.value = previous;
+    else if (accounts.length) select.value = String(accounts[0].id);
+    select._csSync?.();
+  }
+}
+function renderTikTokUsers() {
+  const body = $("tk-user-results");
+  if (!body) return;
+  body.innerHTML = TIKTOK_USERS.map((user, index) => {
+    const uniqueId = String(user.unique_id || "");
+    const secUid = String(user.sec_uid || "");
+    const avatar = user.avatar
+      ? '<img class="avatar" src="' + esc(safeMediaUrl(user.avatar)) + '" alt="" referrerpolicy="no-referrer">'
+      : '<span class="wb-avatar-fallback" aria-hidden="true">' + esc((user.nickname || uniqueId || "T").slice(0, 1)) + '</span>';
+    const disabled = uniqueId ? "" : " disabled";
+    return '<tr><td><div class="user-cell">' + avatar + '<div><b>'
+      + esc(user.nickname || uniqueId || "未命名用户") + '</b><div class="mut">'
+      + (uniqueId ? "@" + esc(uniqueId) : "缺少 unique_id") + '</div></div></div></td>'
+      + '<td><code>' + esc(user.uid || "—") + '</code><div class="mut" title="' + esc(secUid)
+      + '">sec_uid ' + esc(secUid ? secUid.slice(0, 22) + (secUid.length > 22 ? "…" : "") : "—") + '</div></td>'
+      + '<td>' + fmtNum(user.follower_count || 0) + ' 粉丝<div class="mut">'
+      + fmtNum(user.following_count || 0) + ' 关注 · ' + fmtNum(user.video_count || 0) + ' 视频</div></td>'
+      + '<td title="' + esc(user.signature || "") + '">' + esc((user.signature || "—").slice(0, 120)) + '</td>'
+      + '<td class="acttd"><button class="ghost sm"' + disabled + ' onclick="runTikTokUserAction(' + index + ',\'follow\')">关注</button>'
+      + '<button class="ghost sm"' + disabled + ' onclick="runTikTokUserAction(' + index + ',\'unfollow\')">取关</button>'
+      + '<button class="ghost sm"' + disabled + ' onclick="runTikTokUserAction(' + index + ',\'send_dm\')">私信</button></td></tr>';
+  }).join("") || empty(5, "暂无 TikTok 用户结果", "i-user", "选择已登录账号并输入昵称或 unique_id 搜索");
+}
+async function searchTikTokUsers() {
+  const accountId = Number($("tk-account")?.value || 0);
+  const keyword = $("tk-user-query")?.value.trim() || "";
+  const maxResults = Math.max(1, Math.min(100, Number($("tk-user-limit")?.value || 30)));
+  let valid = true;
+  valid = setFieldError($("tk-account"), !accountId ? "请选择 TikTok 账号" : "") && valid;
+  valid = setFieldError($("tk-user-query"), !keyword ? "请输入用户关键词" : "") && valid;
+  if (!valid) return;
+  const status = $("tk-user-status");
+  if (status) status.textContent = "正在通过已登录页面搜索…";
+  await withBusy(evtBtn(), "搜索中", async () => {
+    try {
+      const result = await api("/api/tiktok/users/search", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ account_id: accountId, keyword, max_results: maxResults }),
+      });
+      TIKTOK_USERS = Array.isArray(result.items) ? result.items : [];
+      renderTikTokUsers();
+      if (status) status.textContent = result.error
+        ? "返回 " + TIKTOK_USERS.length + " 个结果；" + result.error
+        : "找到 " + TIKTOK_USERS.length + " 个用户";
+    } catch (e) {
+      TIKTOK_USERS = [];
+      renderTikTokUsers();
+      if (status) status.textContent = "搜索失败：" + e.message;
+      toast("TikTok 用户搜索失败：" + e.message, "err");
+    }
+  });
+}
+async function runTikTokUserAction(index, action) {
+  const user = TIKTOK_USERS[index];
+  if (!user) return;
+  const accountId = Number($("tk-account")?.value || 0);
+  if (!accountId) { toast("请选择 TikTok 执行账号", "err"); return; }
+  const labels = { follow: "关注", unfollow: "取关", send_dm: "私信" };
+  let content = "";
+  if (action === "send_dm") {
+    const value = await uiPrompt({
+      title: "私信 @" + (user.unique_id || user.nickname || "TikTok 用户"),
+      hint: "任务提交后受统一限速和风控控制；无明确回执时需人工核对。",
+      multiline: true, rows: 4,
+    });
+    if (value === null) return;
+    content = value.trim();
+    if (!content) { toast("私信内容不能为空", "err"); return; }
+  } else if (!await uiConfirm({
+    title: labels[action] + "确认",
+    message: "确认对 @" + (user.unique_id || user.nickname || "该用户") + " 执行" + labels[action] + "？",
+    danger: action === "unfollow",
+  })) return;
+  const runNow = Boolean($("tk-action-run-now")?.checked);
+  try {
+    const result = await api("/api/account-actions", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        account_id: accountId, action, target_uid: user.uid || "",
+        target_sec_uid: user.unique_id || "", target_nick: user.nickname || user.unique_id || "",
+        content, run_now: runNow,
+      }),
+    });
+    const uncertain = result.status === "uncertain"
+      || String(result.execution_error || "").startsWith("write_uncertain:");
+    const message = uncertain
+      ? labels[action] + "已提交，结果待核对：" + (result.execution_error || "请到 TikTok 查看")
+      : result.ran ? labels[action] + "成功" : labels[action] + "任务 #" + result.id + " 已进入队列";
+    toast(message, uncertain ? "info" : result.ran ? "ok" : "info", 7000);
+    refreshTaskQueueBadge();
+  } catch (e) { toast(labels[action] + "失败：" + e.message, "err"); }
+}
+async function createTikTokCommentTask() {
+  const accountId = Number($("tk-comment-account")?.value || 0);
+  const awemeId = $("tk-aweme-id")?.value.trim() || "";
+  const authorUniqueId = $("tk-author-id")?.value.trim() || "";
+  const content = $("tk-comment-content")?.value.trim() || "";
+  const targetCommentId = $("tk-target-comment-id")?.value.trim() || "";
+  const targetText = $("tk-target-text")?.value.trim() || "";
+  let valid = true;
+  valid = setFieldError($("tk-comment-account"), !accountId ? "请选择 TikTok 账号" : "") && valid;
+  valid = setFieldError($("tk-aweme-id"), !awemeId ? "请输入作品链接或 ID" : "") && valid;
+  valid = setFieldError($("tk-author-id"), /^\d+$/.test(awemeId) && !authorUniqueId ? "只填作品 ID 时需填写作者 @username" : "") && valid;
+  valid = setFieldError($("tk-comment-content"), !content ? "请输入评论内容" : "") && valid;
+  valid = setFieldError($("tk-target-text"), targetCommentId && !targetText ? "回复任务需填写目标评论原文" : "") && valid;
+  if (!valid) return;
+  await withBusy(evtBtn(), "提交中", async () => {
+    try {
+      const result = await api("/api/tiktok/comment-tasks", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          account_id: accountId, aweme_id: awemeId, author_unique_id: authorUniqueId, content,
+          target_comment_id: targetCommentId, target_text: targetText,
+          target_nick: $("tk-target-nick")?.value.trim() || "",
+          run_now: Boolean($("tk-comment-run-now")?.checked),
+        }),
+      });
+      const uncertain = result.status === "uncertain"
+        || String(result.execution_error || "").startsWith("write_uncertain:");
+      const message = uncertain
+        ? "评论已提交，结果待核对：" + (result.execution_error || "请到 TikTok 查看")
+        : result.ran ? "评论已发布" : "评论任务 #" + result.id + " 已进入队列";
+      toast(message, uncertain ? "info" : result.ran ? "ok" : "info", 7000);
+      if (!uncertain) {
+        $("tk-comment-content").value = "";
+        $("tk-target-comment-id").value = "";
+        $("tk-target-text").value = "";
+        $("tk-target-nick").value = "";
+      }
+      refreshCommentTasks();
+      refreshTaskQueueBadge();
+    } catch (e) { toast("TikTok 评论任务创建失败：" + e.message, "err"); }
+  });
 }
 
 // ═══════════ 风控中心 ═══════════
@@ -2924,6 +3103,7 @@ function onHubAcc() {
 }
 // 面板内子标签(我的作品/关注/粉丝/私信)切换
 function switchHubTab(name) {
+  if (PLATFORM === "tiktok" && ["following", "fans", "dm"].includes(name)) name = "myworks";
   HUB_TAB = name;
   try { localStorage.setItem("dym-hubtab", name); } catch (e) {}
   document.querySelectorAll("[data-hubpanel]").forEach(p => { p.style.display = p.dataset.hubpanel === name ? "" : "none"; });
@@ -3022,6 +3202,12 @@ function workLink(platform, id) {
   if (platform === "xhs") return "https://www.xiaohongshu.com/explore/" + id;
   if (platform === "kuaishou") return "https://www.kuaishou.com/short-video/" + id;
   if (platform === "shipinhao") return "https://channels.weixin.qq.com/platform/post/list";
+  if (platform === "tiktok") {
+    const account = ACCOUNTS.find(a => String(a.id) === String(HUB_ACC));
+    const author = String(account?.douyin_id || "").replace(/^@/, "");
+    return author ? `https://www.tiktok.com/@${encodeURIComponent(author)}/video/${id}`
+      : `https://www.tiktok.com/search?q=${id}`;
+  }
   return "https://www.douyin.com/video/" + id;
 }
 function openWork(platform, id) { try { window.open(workLink(platform, id), "_blank", "noopener"); } catch (e) {} }
@@ -5214,11 +5400,16 @@ function applyCollectionForm() {
   if ($("col-dir-wrap")) $("col-dir-wrap").style.display = enabled ? "" : "none";
   const xhs = PLATFORM === "xhs";
   const channels = PLATFORM === "shipinhao";
+  const tiktok = PLATFORM === "tiktok";
   const platformName = PF_NAME[PLATFORM] || "平台";
   document.querySelectorAll("#col-source [data-xhs-source]").forEach(option => { option.disabled = !xhs; option.hidden = !xhs; });
-  document.querySelectorAll("#col-source option:not([data-xhs-source]):not([data-channels-source])").forEach(option => { option.disabled = channels; option.hidden = channels; });
+  document.querySelectorAll("#col-source option:not([data-xhs-source]):not([data-channels-source])").forEach(option => {
+    const blocked = channels || (tiktok && option.value !== "keyword");
+    option.disabled = blocked; option.hidden = blocked;
+  });
   document.querySelectorAll("#col-source [data-channels-source]").forEach(option => { option.disabled = !channels; option.hidden = !channels; });
   if (channels) $("col-source").value = "account_works";
+  else if (tiktok) $("col-source").value = "keyword";
   else if (["favorite_all", "favorite_board", "account_works"].includes(collectionSourceValue())) $("col-source").value = "keyword";
   const source = collectionSourceValue();
   const favorite = ["favorite_all", "favorite_board"].includes(source);
@@ -5235,7 +5426,7 @@ function applyCollectionForm() {
         ? `新建${platformName}创作者采集`
         : `新建${platformName}关键词采集`;
   }
-  if ($("collection-create-sub")) $("collection-create-sub").textContent = channels ? "同步当前登录账号的视频与图文，并按需采集评论" : favorite ? "导入收藏笔记并继续抓取详情与评论" : source === "creator" ? "导入创作者公开作品并抓取评论" : xhs ? "批量搜索笔记并抓取评论" : "批量搜索视频并抓取评论";
+  if ($("collection-create-sub")) $("collection-create-sub").textContent = channels ? "同步当前登录账号的视频与图文，并按需采集评论" : favorite ? "导入收藏笔记并继续抓取详情与评论" : source === "creator" ? "导入创作者公开作品并抓取评论" : xhs ? "批量搜索笔记并抓取评论" : tiktok ? "通过离线签名 API 批量搜索 TikTok 视频并抓取评论" : "批量搜索视频并抓取评论";
   if ($("nav-collections-label")) $("nav-collections-label").textContent = channels ? "本账号作品采集" : "关键词采集";
   if ($("col-content-limit-label")) $("col-content-limit-label").textContent = channels ? "作品上限" : "每词作品上限";
   if ($("col-page-limit-label")) $("col-page-limit-label").innerHTML = channels ? '作品页采集深度 <span class="field-scope">1–40 页</span>' : '每词采集深度 <span class="field-scope">1–40 页</span>';
@@ -5246,6 +5437,8 @@ function applyCollectionForm() {
   if ($("collection-callout-title")) $("collection-callout-title").textContent = channels ? "仅采集当前登录视频号账号自己的已发布作品" : "作品上限、采集深度和停止条件任一满足即结束";
   if ($("collection-callout-copy")) $("collection-callout-copy").textContent = channels
     ? "视频号助手会分别读取视频与图文管理页；作品元数据和统计可正常保存。若平台仅返回加密媒体，任务会保留元数据并跳过直接下载。评论入口如遇页面改版会在任务异常中明确记录。"
+    : tiktok
+    ? "TikTok 当前默认 native：关键词、评论和二级回复均由离线签名 API 直连，全程不打开浏览器；只有在设置中手动选择 auto/browser 才会使用页面。暂不处理直播和发布。"
     : xhs
     ? "小红书采集复用所选账号的可见浏览器或显式 API 读取模式；最新、类型、时间和数据门槛会在入库前复核；任务串行执行，可随时取消，已入库结果会保留。"
     : PLATFORM === "kuaishou"
@@ -5364,7 +5557,7 @@ function renderCollectionJobs() {
       (sourceValues.length > 5 ? `<span class="meta-chip more">+${sourceValues.length - 5}</span>` : "");
     const canCancel = ["pending", "running"].includes(job.status);
     const canRetry = ["done", "partial", "failed", "canceled"].includes(job.status);
-    const canEdit = canRetry && ["douyin", "xhs", "kuaishou", "shipinhao"].includes(job.platform);
+    const canEdit = canRetry && ["douyin", "xhs", "kuaishou", "shipinhao", "tiktok"].includes(job.platform);
     const errorText = collectionLastError(job);
     const sortLabel = { general: "综合", latest: "最新", most_liked: "最多点赞" }[job.search_sort] || "综合";
     const timeLabel = { all: "不限时间", day: "一天内", week: "一周内", half_year: "半年内" }[job.publish_time] || "不限时间";
@@ -5389,7 +5582,7 @@ function renderCollectionJobs() {
 }
 async function refreshCollections() {
   const isCurrent = beginViewRequest("collections");
-  if (!$("collection-job-table") || !["douyin", "xhs", "kuaishou", "shipinhao"].includes(PLATFORM)) return;
+  if (!$("collection-job-table") || !["douyin", "xhs", "kuaishou", "shipinhao", "tiktok"].includes(PLATFORM)) return;
   try {
     const requestedPlatform = PLATFORM;
     const jobs = await api("/api/collections?platform=" + encodeURIComponent(requestedPlatform));
@@ -8309,7 +8502,7 @@ $("collection-content-list").innerHTML = collectionResultSkeleton(4);
 $("queue-table").innerHTML = skeleton(7);
 
 // restore last-selected section (default: 总览);旧版四个独立页已并入「账号管理」
-const VALID_TABS = ["overview", "accounts", "risk-control", "queue", "collections", "monitors", "comments", "danmaku", "hub", "publish", "autocomment", "share-download", "notifications", "settings"];
+const VALID_TABS = ["overview", "accounts", "risk-control", "queue", "collections", "monitors", "comments", "danmaku", "hub", "tiktok-tools", "publish", "autocomment", "share-download", "notifications", "settings"];
 const LEGACY_HUB_TABS = ["myworks", "following", "fans", "dm"];
 switchTab((() => {
   try {
@@ -8323,7 +8516,7 @@ switchTab((() => {
 switchHubTab(HUB_TAB);   // 恢复上次停留的子标签(我的作品/关注/粉丝/私信)
 
 // restore last-selected platform (default: 抖音)
-PLATFORM = (() => { try { const p = localStorage.getItem("dym-pf"); return ["xhs", "douyin", "kuaishou", "shipinhao"].includes(p) ? p : "douyin"; } catch (e) { return "douyin"; } })();
+PLATFORM = (() => { try { const p = localStorage.getItem("dym-pf"); return ["xhs", "douyin", "kuaishou", "shipinhao", "tiktok"].includes(p) ? p : "douyin"; } catch (e) { return "douyin"; } })();
 applyPlatformUI();
 updateTaskQueuePlatformLabel();
 

@@ -88,6 +88,7 @@
   .pswitch button.active[data-pf="xhs"] { background:var(--xhs-soft); color:var(--xhs); border-color:var(--xhs-ring); }
   .pswitch button.active[data-pf="kuaishou"] { background:rgba(255,121,2,.16); color:#ff7902; border-color:rgba(255,121,2,.4); }
   .pswitch button.active[data-pf="shipinhao"] { background:rgba(7,193,96,.16); color:#07c160; border-color:rgba(7,193,96,.4); }
+  .pswitch button.active[data-pf="tiktok"] { background:rgba(37,244,238,.12); color:#00b8b2; border-color:rgba(254,44,85,.38); }
   .hidden { display:none !important; }
 
   /* Platform accents and light/dark themes are independent: appearance.css. */
@@ -1810,6 +1811,7 @@
     <button role="tab" data-pf="xhs" onclick="switchPlatform('xhs')">小红书</button>
     <button role="tab" data-pf="kuaishou" onclick="switchPlatform('kuaishou')">快手</button>
     <button role="tab" data-pf="shipinhao" onclick="switchPlatform('shipinhao')">视频号</button>
+    <button role="tab" data-pf="tiktok" onclick="switchPlatform('tiktok')">TikTok</button>
   </div>
   <div class="header-actions">
     <button class="ghost command-trigger" id="command-trigger" type="button" aria-label="搜索功能" aria-haspopup="dialog" aria-controls="command-dialog" aria-keyshortcuts="Control+k Meta+k" title="搜索功能（Ctrl / ⌘ K）"><svg aria-hidden="true"><use href="#i-logo"/></svg><span>搜索功能</span><kbd>Ctrl K</kbd></button>
@@ -1830,16 +1832,17 @@
   <nav class="nav" aria-label="主导航">
     <button class="navitem" data-tab="overview" onclick="switchTab('overview', true)"><svg><use href="#i-overview"/></svg><span class="nav-label">工作概览</span></button>
     <button class="navitem" data-tab="accounts" onclick="switchTab('accounts', true)"><svg><use href="#i-card"/></svg><span class="nav-label">平台账号</span><span class="nav-badge" id="tb-acc">0</span></button>
-    <button class="navitem notsh-only" data-tab="monitors" onclick="switchTab('monitors', true)"><svg><use href="#i-target"/></svg><span class="nav-label">作品监控</span><span class="nav-badge" id="tb-mon">0</span></button>
+    <button class="navitem notsh-only tk-hide" data-tab="monitors" onclick="switchTab('monitors', true)"><svg><use href="#i-target"/></svg><span class="nav-label">作品监控</span><span class="nav-badge" id="tb-mon">0</span></button>
     <button class="navitem collect-only" data-tab="collections" onclick="switchTab('collections', true)"><svg><use href="#i-hash"/></svg><span class="nav-label" id="nav-collections-label">关键词采集</span><span class="nav-badge" id="tb-col">0</span></button>
-    <button class="navitem notsh-only" data-tab="comments" onclick="switchTab('comments', true)"><svg><use href="#i-msg"/></svg><span class="nav-label">评论监控</span><span class="nav-badge" id="tb-watch">0</span></button>
+    <button class="navitem notsh-only tk-hide" data-tab="comments" onclick="switchTab('comments', true)"><svg><use href="#i-msg"/></svg><span class="nav-label">评论监控</span><span class="nav-badge" id="tb-watch">0</span></button>
     <button class="navitem dy-only" data-tab="danmaku" onclick="switchTab('danmaku', true)"><svg><use href="#i-captions"/></svg><span class="nav-label">弹幕监控</span><span class="nav-badge" id="tb-danmaku">0</span></button>
     <div class="nav-sep">本账号</div>
-    <button class="navitem" data-tab="hub" onclick="switchTab('hub', true)"><svg><use href="#i-library"/></svg><span class="nav-label">我的内容</span></button>
+    <button class="navitem" data-tab="hub" onclick="switchTab('hub', true)"><svg><use href="#i-library"/></svg><span class="nav-label">本账号管理</span></button>
     <div class="nav-sep">工具</div>
     <button class="navitem" data-tab="queue" onclick="switchTab('queue', true)"><svg><use href="#i-list"/></svg><span class="nav-label">任务队列</span><span class="nav-badge" id="tb-queue">0</span></button>
+    <button class="navitem tk-only" data-tab="tiktok-tools" onclick="switchTab('tiktok-tools', true)"><svg><use href="#i-user"/></svg><span class="nav-label">用户互动</span></button>
     <button class="navitem pub-only" data-tab="publish" onclick="switchTab('publish', true)"><svg><use href="#i-send"/></svg><span class="nav-label">发布</span><span class="nav-badge" id="tb-pub">0</span></button>
-    <button class="navitem notsh-only" data-tab="autocomment" onclick="switchTab('autocomment', true)"><svg><use href="#i-automation"/></svg><span class="nav-label">自动评论</span><span class="nav-badge" id="tb-ac">0</span></button>
+    <button class="navitem notsh-only tk-hide" data-tab="autocomment" onclick="switchTab('autocomment', true)"><svg><use href="#i-automation"/></svg><span class="nav-label">自动评论</span><span class="nav-badge" id="tb-ac">0</span></button>
     <button class="navitem" data-tab="share-download" onclick="switchTab('share-download', true)"><svg><use href="#i-download"/></svg><span class="nav-label">链接下载</span></button>
     <button class="navitem" data-tab="notifications" onclick="switchTab('notifications', true)"><svg><use href="#i-bell"/></svg><span class="nav-label">通知</span></button>
     <button class="navitem" data-tab="settings" onclick="switchTab('settings', true)"><svg><use href="#i-settings"/></svg><span class="nav-label">设置</span></button>
@@ -1885,7 +1888,7 @@
           <span class="qa-copy"><b>管理平台账号</b><span>登录、检查状态与配置代理</span></span>
           <svg><use href="#i-next"/></svg>
         </button>
-        <button class="quick-action notsh-only" type="button" onclick="switchTab('monitors', true)">
+        <button class="quick-action notsh-only tk-hide" type="button" onclick="switchTab('monitors', true)">
           <span class="qa-ic"><svg><use href="#i-target"/></svg></span>
           <span class="qa-copy"><b>添加作品监控</b><span>设置目标与自动下载策略</span></span>
           <svg><use href="#i-next"/></svg>
@@ -1905,7 +1908,7 @@
   </div>
   <div class="platform-callout" role="note">
     <svg aria-hidden="true"><use href="#i-info"/></svg>
-    <div><b>平台数据彼此独立</b><p>切换平台后，账号、监控与评论数据会独立展示；通知和下载设置全局共用。视频号仅提供本账号作品、数据与发布，其余能力以导航中可见入口为准。</p></div>
+    <div><b>平台数据彼此独立</b><p>切换平台后，账号、采集与任务数据会独立展示；通知和下载设置全局共用。TikTok 已提供登录、关键词采集、本账号作品与数据、用户搜索及受控写操作，不含直播和发布。</p></div>
   </div>
   </section>
 
@@ -1927,6 +1930,7 @@
         <button class="ghost ks-only" onclick="startKsCreatorLogin()" title="普通快手扫码登录已可用于发布；仅在创作平台仍提示登录时使用"><svg><use href="#i-send"/></svg>创作平台登录（备用）</button>
         <button class="ghost ks-only" onclick="toggleCookie()">Cookie 粘贴</button>
         <button class="sh-only" onclick="startChannelsLogin()"><svg><use href="#i-login"/></svg>视频号登录</button>
+        <button class="tk-only" onclick="startTikTokLogin()"><svg><use href="#i-login"/></svg>TikTok 登录</button>
       </div>
       <div id="qrbox" style="display:none;margin-bottom:14px">
         <div class="mut" id="qrstatus">准备中…</div>
@@ -2000,6 +2004,46 @@
         <button onclick="addProxy()"><svg><use href="#i-plus"/></svg>加入代理池</button>
       </div>
       <div class="table-wrap mini-table"><table id="proxy-table" aria-label="代理池列表"><tbody></tbody></table></div>
+    </div>
+  </section>
+
+  <section data-panel="tiktok-tools" class="tk-only">
+    <div class="platform-callout" role="note">
+      <svg aria-hidden="true"><use href="#i-info"/></svg>
+      <div><b>TikTok 用户互动工具</b><p>这里处理站外用户搜索和主动互动；本账号自己的作品、数据和账号维护请到左侧「本账号管理」。所有写操作仍进入统一任务队列和风控审计。</p></div>
+    </div>
+    <div class="card" data-section="tiktok-actions">
+      <div class="card-head">
+        <span class="card-ic"><svg><use href="#i-user"/></svg></span>
+        <h2>TikTok 用户搜索与互动 <span class="sub">搜索用户后关注 / 取关 / 私信</span></h2>
+      </div>
+      <div class="form-grid cols-4">
+        <div class="form-field"><label for="tk-account">执行账号</label><select id="tk-account"></select></div>
+        <div class="form-field"><label for="tk-user-query">用户关键词</label><input id="tk-user-query" type="search" placeholder="昵称或 @unique_id" onkeydown="if(event.key==='Enter'){event.preventDefault();searchTikTokUsers()}"></div>
+        <div class="form-field"><label for="tk-user-limit">结果上限</label><input id="tk-user-limit" type="number" min="1" max="100" value="30"></div>
+        <div class="form-field"><label>执行方式</label><label class="check-row"><input id="tk-action-run-now" type="checkbox"><span>立即打开浏览器执行</span></label></div>
+      </div>
+      <div class="form-actions"><span class="status-text" id="tk-user-status" role="status" aria-live="polite"></span><button type="button" onclick="searchTikTokUsers()"><svg><use href="#i-search"/></svg>搜索用户</button></div>
+      <div class="table-wrap" style="margin-top:12px"><table aria-label="TikTok 用户搜索结果"><thead><tr><th>用户</th><th>账号标识</th><th>数据</th><th>简介</th><th>操作</th></tr></thead><tbody id="tk-user-results"></tbody></table></div>
+      <div class="form-note" style="margin-top:12px"><svg aria-hidden="true"><use href="#i-info"/></svg><span>用于查找其他 TikTok 用户并创建关注、取关或私信任务，不是本账号资料页。</span></div>
+    </div>
+
+    <div class="card" data-section="tiktok-comment">
+      <div class="card-head">
+        <span class="card-ic"><svg><use href="#i-msg"/></svg></span>
+        <h2>TikTok 手动评论任务 <span class="sub">指定作品创建评论或回复任务</span></h2>
+      </div>
+      <div class="form-grid cols-4">
+        <div class="form-field"><label for="tk-comment-account">执行账号</label><select id="tk-comment-account"></select></div>
+        <div class="form-field"><label for="tk-aweme-id">作品链接 / ID</label><input id="tk-aweme-id" placeholder="https://www.tiktok.com/@user/video/... 或 video id"></div>
+        <div class="form-field"><label for="tk-author-id">作者 @username <span class="field-scope">仅填 ID 时必填</span></label><input id="tk-author-id" placeholder="例如 creator_name"></div>
+        <div class="form-field"><label for="tk-target-comment-id">目标评论 ID <span class="field-scope">回复时填写</span></label><input id="tk-target-comment-id" placeholder="顶层评论可留空"></div>
+        <div class="form-field"><label for="tk-target-nick">目标昵称 <span class="field-scope">可选</span></label><input id="tk-target-nick" placeholder="用于任务记录"></div>
+      </div>
+      <div class="form-field"><label for="tk-comment-content">评论内容</label><textarea id="tk-comment-content" rows="3" placeholder="输入要发布的评论或回复"></textarea></div>
+      <div class="form-field"><label for="tk-target-text">目标评论原文 <span class="field-scope">回复任务必填，用于在页面定位回复区</span></label><textarea id="tk-target-text" rows="2" placeholder="顶层评论可留空"></textarea></div>
+      <div class="form-actions"><label class="check-row"><input id="tk-comment-run-now" type="checkbox"><span>立即执行</span></label><span class="actions-spacer"></span><button type="button" onclick="createTikTokCommentTask()"><svg><use href="#i-send"/></svg>创建评论任务</button></div>
+      <div class="form-note" style="margin-top:12px"><svg aria-hidden="true"><use href="#i-info"/></svg><span>这是主动写入工具，因此与账号资料分开；任务结果在「任务队列」查看。</span></div>
     </div>
   </section>
 
@@ -2633,6 +2677,13 @@
               <option value="hybrid">API 优先，普通失败浏览器回退（推荐）</option><option value="api">仅 API，不打开浏览器</option><option value="browser">仅浏览器</option>
             </select>
             <p class="field-help" id="engine-douyin-read-help">关键词采集先直连 search/single API；普通接口兼容失败才回退浏览器，verification_required/风控时进入冷却且不打开浏览器。通用链接下载仍按所选读取模式执行。</p>
+          </div>
+          <div class="form-field">
+            <label for="engine-tiktok_read_mode">TikTok 关键词获取方式</label>
+            <select id="engine-tiktok_read_mode" name="tiktok_read_mode" disabled aria-describedby="engine-tiktok-read-help">
+              <option value="native">全程离线 API，不打开浏览器（推荐）</option><option value="auto">离线 API 失败后浏览器回退</option><option value="browser">仅已授权浏览器页面</option>
+            </select>
+            <p class="field-help" id="engine-tiktok-read-help">native 模式的关键词、评论和二级回复均使用本账号 Cookie、UA、代理与离线 X-Dynosaur/X-Gnarly，全程不打开浏览器；只有手动选择 auto/browser 才可能打开页面。</p>
           </div>
           <div class="form-field">
             <label for="engine-monitor_initial_backfill_count">抖音新监控的历史作品数量</label>
@@ -3475,22 +3526,22 @@
     <div class="card">
       <div class="card-head">
         <span class="card-ic"><svg><use href="#i-user"/></svg></span>
-        <h2>账号管理 <span class="sub">本账号的作品 / 关注 / 粉丝 / 私信</span></h2>
+        <h2>本账号管理 <span class="sub">本账号的作品、数据与已支持的关系功能</span></h2>
         <div class="right" style="display:flex;gap:8px;align-items:center">
           <select id="hub-acc" onchange="onHubAcc()" style="width:auto;min-width:190px" aria-label="选择账号"></select>
         </div>
       </div>
       <div class="tabbar" style="position:static;margin-bottom:14px">
         <button class="tab active" data-hubtab="myworks" onclick="switchHubTab('myworks')"><svg><use href="#i-film"/></svg>我的作品 <span class="tab-badge" id="hb-myworks">0</span></button>
-        <button class="tab notsh-only" data-hubtab="following" onclick="switchHubTab('following')"><svg><use href="#i-user"/></svg>关注 <span class="tab-badge" id="hb-following">0</span></button>
-        <button class="tab notsh-only" data-hubtab="fans" onclick="switchHubTab('fans')"><svg><use href="#i-heart"/></svg>粉丝 <span class="tab-badge" id="hb-fans">0</span></button>
-        <button class="tab notsh-only" data-hubtab="dm" onclick="switchHubTab('dm')"><svg><use href="#i-send"/></svg>私信 <span class="tab-badge" id="hb-dm">0</span></button>
+        <button class="tab notsh-only tk-hide" data-hubtab="following" onclick="switchHubTab('following')"><svg><use href="#i-user"/></svg>关注 <span class="tab-badge" id="hb-following">0</span></button>
+        <button class="tab notsh-only tk-hide" data-hubtab="fans" onclick="switchHubTab('fans')"><svg><use href="#i-heart"/></svg>粉丝 <span class="tab-badge" id="hb-fans">0</span></button>
+        <button class="tab notsh-only tk-hide" data-hubtab="dm" onclick="switchHubTab('dm')"><svg><use href="#i-send"/></svg>私信 <span class="tab-badge" id="hb-dm">0</span></button>
         <button class="tab" data-hubtab="stats" onclick="switchHubTab('stats')"><svg><use href="#i-eye"/></svg>数据 <span class="tab-badge" id="hb-stats">0</span></button>
       </div>
 
       <div data-hubpanel="myworks">
         <div style="display:flex;gap:12px;align-items:flex-start;margin-bottom:12px">
-          <div class="hint" style="margin:0;flex:1">点「同步作品」用该账号登录态打开其主页抓取作品列表(小红书/快手自动走站内「我」入口;小红书首屏笔记从页面内嵌数据直读)。计数只统计当前所选账号。</div>
+          <div class="hint" style="margin:0;flex:1">点「同步作品」用当前账号登录态读取自己的已发布作品。TikTok 会打开本账号公开主页，并同时读取作品接口、页面内嵌数据和可见作品卡。计数只统计当前所选账号。</div>
           <button class="ghost sm" style="flex:0 0 auto" onclick="syncMyWorks()"><svg><use href="#i-download"/></svg>同步作品</button>
         </div>
         <div id="mw-grid" class="xhs-grid"></div>

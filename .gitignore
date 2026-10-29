@@ -10,6 +10,7 @@ test-results/
 playwright-report/
 
 # Local verification, rollback, and temporary agent outputs
+.analysis/
 artifacts/
 .codex-*/
 *.tmp

@@ -1,10 +1,22 @@
 import asyncio
 import unittest
+from types import SimpleNamespace
 
-from app.browser.proxy import ProxyConfigError, ProxyPlan, Socks5AuthRelay
+from app.browser.proxy import (HttpProxyAuthRelay, ProxyConfigError, ProxyPlan,
+                               Socks5AuthRelay)
+from app.engine.monitor import MonitorEngine
 
 
 class ProxyPlanTests(unittest.TestCase):
+    def test_rotating_proxy_exit_is_usable_but_hard_failures_are_blocked(self):
+        self.assertFalse(MonitorEngine._proxy_bad(SimpleNamespace(
+            proxy="http://proxy.local:8080", proxy_status="rotating")))
+        self.assertFalse(MonitorEngine._proxy_bad(SimpleNamespace(
+            proxy="http://proxy.local:8080", proxy_status="drifted")))
+        for status in ("bad", "auth_error", "blocked"):
+            with self.subTest(status=status):
+                self.assertTrue(MonitorEngine._proxy_bad(SimpleNamespace(
+                    proxy="http://proxy.local:8080", proxy_status=status)))
     def test_supports_http_and_socks_with_or_without_authentication(self):
         cases = (
             ("http://127.0.0.1:8080", "http", False),
@@ -181,6 +193,81 @@ async def _authenticated_socks_relay_rejects_udp_and_closes_cleanly():
 
 def test_authenticated_socks_relay_rejects_udp_and_closes_cleanly():
     asyncio.run(_authenticated_socks_relay_rejects_udp_and_closes_cleanly())
+
+
+class _AuthenticatedHttpProxyFixture:
+    def __init__(self, username="alice", password="secret"):
+        self.expected = "Basic " + __import__("base64").b64encode(
+            f"{username}:{password}".encode()).decode()
+        self.server = None
+        self.authorization = ""
+        self.target = ""
+        self.request_seen = asyncio.Event()
+
+    @property
+    def url(self):
+        port = self.server.sockets[0].getsockname()[1]
+        return f"http://alice:secret@127.0.0.1:{port}"
+
+    async def start(self):
+        self.server = await asyncio.start_server(self._handle, "127.0.0.1", 0)
+
+    async def close(self):
+        self.server.close()
+        await self.server.wait_closed()
+
+    async def _handle(self, reader, writer):
+        try:
+            header = await reader.readuntil(b"\r\n\r\n")
+            lines = header.decode("latin-1").split("\r\n")
+            self.target = lines[0]
+            for line in lines[1:]:
+                if line.lower().startswith("proxy-authorization:"):
+                    self.authorization = line.split(":", 1)[1].strip()
+            self.request_seen.set()
+            if self.authorization != self.expected:
+                writer.write(b"HTTP/1.1 407 Proxy Authentication Required\r\n\r\n")
+                await writer.drain()
+                return
+            writer.write(b"HTTP/1.1 200 Connection Established\r\n\r\n")
+            await writer.drain()
+            while data := await reader.read(65536):
+                writer.write(data)
+                await writer.drain()
+        finally:
+            writer.close()
+            await writer.wait_closed()
+
+
+async def _authenticated_http_relay_injects_proxy_authorization():
+    upstream = _AuthenticatedHttpProxyFixture()
+    await upstream.start()
+    relay = HttpProxyAuthRelay(ProxyPlan.parse(upstream.url))
+    port = await relay.start()
+    reader, writer = await asyncio.open_connection("127.0.0.1", port)
+    try:
+        writer.write(
+            b"CONNECT fixture.local:443 HTTP/1.1\r\n"
+            b"Host: fixture.local:443\r\n\r\n")
+        await writer.drain()
+        response = await reader.readuntil(b"\r\n\r\n")
+        assert response.startswith(b"HTTP/1.1 200")
+        await asyncio.wait_for(upstream.request_seen.wait(), 1)
+        assert upstream.authorization == upstream.expected
+        assert upstream.target == "CONNECT fixture.local:443 HTTP/1.1"
+        writer.write(b"echo-through-http-relay")
+        await writer.drain()
+        assert await reader.readexactly(23) == b"echo-through-http-relay"
+    finally:
+        writer.close()
+        await writer.wait_closed()
+        await relay.close()
+        await upstream.close()
+    assert relay.active_connections == 0
+
+
+def test_authenticated_http_relay_injects_proxy_authorization():
+    asyncio.run(_authenticated_http_relay_injects_proxy_authorization())
 
 
 if __name__ == "__main__":

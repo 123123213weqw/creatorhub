@@ -16,18 +16,18 @@ def test_xhs_note_card_uses_chinese_status_label_mapper():
     assert ">${r.download_status}${r.error" not in note_card
 
 
-def test_keyword_collection_supports_four_platforms_with_channels_account_only_source():
+def test_keyword_collection_supports_tiktok_with_channels_account_only_source():
     source = APP_JS.read_text(encoding="utf-8")
     html = INDEX_HTML.read_text(encoding="utf-8")
     workbench = WORKBENCH_JSX.read_text(encoding="utf-8")
 
-    assert '!["douyin", "xhs", "kuaishou", "shipinhao"].includes(PLATFORM) && CURRENT_TAB === "collections"' in source
+    assert '!["douyin", "xhs", "kuaishou", "shipinhao", "tiktok"].includes(PLATFORM) && CURRENT_TAB === "collections"' in source
     assert 'platform: PLATFORM, account_id: accountId' in source
     assert 'a.platform === PLATFORM' in source
     assert 'platform: job.platform, keywords' in source
     assert '.filter(job => job.platform === requestedPlatform)' in source
     assert 'onclick="editCollection(${job.id})"' in source
-    assert 'canRetry && ["douyin", "xhs", "kuaishou", "shipinhao"].includes(job.platform)' in source
+    assert 'canRetry && ["douyin", "xhs", "kuaishou", "shipinhao", "tiktok"].includes(job.platform)' in source
     assert 'canRetry && job.platform === "douyin"' not in source
     assert '@app.put' not in html
     assert 'id="collection-create-title"' in html

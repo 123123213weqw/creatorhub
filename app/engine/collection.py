@@ -26,6 +26,7 @@ from ..browser import (
     fetch_xhs_notes,
     fetch_xhs_search,
 )
+from ..browser.tiktok_fetcher import fetch_tiktok_comments, fetch_tiktok_search
 from ..db import get_session
 from ..models import (
     KeywordCollectionComment,
@@ -45,6 +46,8 @@ from ..platforms.kuaishou import (
     parse_ks_comment,
     parse_ks_feed,
 )
+from ..platforms.tiktok import parse_tiktok_aweme, parse_tiktok_comment
+from ..platforms.tiktok.client import TikTokNativeClient
 from ..platforms.channels import (
     flatten_channels_comments,
     parse_channels_comment,
@@ -79,6 +82,44 @@ def _media_json(aweme: Aweme) -> str:
     ], ensure_ascii=False)
 
 
+def _tiktok_download_session(account, identity, default_user_agent: str) \
+        -> tuple[str, dict[str, str]]:
+    """Return the exact account UA and TikTok cookies for CDN downloads.
+
+    A visible login normally lives in ``storage_state``.  Keep the creator
+    state as an additive fallback so imported/legacy accounts do not lose a
+    valid TikTok session merely because it was stored in the alternate field.
+    Cookie extraction remains domain-scoped inside ``TikTokNativeClient``.
+    """
+    user_agent = str(
+        getattr(identity, "ua", "")
+        or getattr(account, "ua", "")
+        or default_user_agent
+        or ""
+    )
+    cookies: dict[str, str] = {}
+    for field in ("storage_state", "creator_storage_state"):
+        state = getattr(account, field, "") or ""
+        if not state:
+            continue
+        cookies.update(TikTokNativeClient(
+            storage_state=state,
+            user_agent=user_agent,
+        ).cookies)
+    return user_agent, cookies
+
+
+def _content_error_after_download(value: str, error: str) -> str:
+    """Replace stale downloader errors while preserving unrelated detail errors."""
+    parts = [
+        part.strip() for part in str(value or "").split(";")
+        if part.strip() and not part.strip().startswith("下载失败(")
+    ]
+    if error:
+        parts.append(str(error).strip())
+    return "; ".join(parts)
+
+
 def _author_id(raw: dict, platform: str) -> str:
     if platform == "douyin":
         author = raw.get("author") or {}
@@ -92,6 +133,11 @@ def _author_id(raw: dict, platform: str) -> str:
         author = raw.get("author") or raw.get("finderUser") or {}
         return str(author.get("username") or author.get("finderUsername")
                    or raw.get("username") or raw.get("finderUsername") or "")
+    if platform == "tiktok":
+        item = raw.get("item") or raw.get("aweme_info") or raw.get("itemStruct") or raw
+        author = item.get("author") or {}
+        return str(author.get("secUid") or author.get("sec_uid")
+                   or author.get("id") or author.get("uid") or "")
     card = raw.get("note_card") or raw
     user = card.get("user") or {}
     return str(user.get("user_id") or user.get("userid") or user.get("id") or "")
@@ -389,6 +435,49 @@ class KeywordCollector:
             block_media=self.cfg.engine.block_media_resources,
         )
 
+    async def _discover_tiktok(self, account, identity, keyword: str,
+                               job: KeywordCollectionJob) -> tuple[list[dict], str]:
+        mode = str(getattr(self.cfg.engine, "tiktok_read_mode", "native") or "native")
+        if mode in {"auto", "native"}:
+            client = TikTokNativeClient(
+                storage_state=getattr(account, "storage_state", "") or "",
+                user_agent=identity.ua,
+                proxy=identity.proxy,
+                locale=identity.locale,
+                timezone=identity.timezone_id,
+                viewport=(identity.viewport_w, identity.viewport_h),
+                region="US",
+                device_seed=identity.fp_seed or str(identity.account_id or "creatorhub"),
+                timeout=max(10, int(self.cfg.engine.request_timeout_seconds)),
+            )
+            native = await client.search(
+                keyword, count=job.max_contents_per_keyword, offset=0)
+            if native.items or mode == "native":
+                return native.items, native.error
+            if native.category == "empty_valid":
+                return [], ""
+            print(
+                f"[tiktok-search] 离线接口兼容失败，页面回退: "
+                f"{native.category}; HTTP={native.http_status}; "
+                f"bytes={native.body_length}; tt_orcas_res={native.tt_orcas_res!r}"
+            )
+        if mode == "auto":
+            async with self.browser.temporary_headed_context(identity):
+                return await fetch_tiktok_search(
+                    self.browser, identity, keyword,
+                    max_results=job.max_contents_per_keyword,
+                    max_scrolls=job.max_pages_per_keyword,
+                    stagnant_limit=job.stagnant_pages,
+                    block_media=self.cfg.engine.block_media_resources,
+                )
+        return await fetch_tiktok_search(
+            self.browser, identity, keyword,
+            max_results=job.max_contents_per_keyword,
+            max_scrolls=job.max_pages_per_keyword,
+            stagnant_limit=job.stagnant_pages,
+            block_media=self.cfg.engine.block_media_resources,
+        )
+
     async def _discover_ks_creator(
             self, account, job: KeywordCollectionJob) -> tuple[list[dict], str]:
         values, _author, error = await fetch_ks_videos(
@@ -614,6 +703,7 @@ class KeywordCollector:
             row.desc = aweme.desc
             row.author_name = aweme.author_name
             row.author_id = author_id
+            row.source_url = aweme.source_url
             row.media_type = aweme.media_type
             row.create_time = aweme.create_time
             row.cover_url = aweme.cover or ""
@@ -641,7 +731,7 @@ class KeywordCollector:
 
     async def _download(self, job: KeywordCollectionJob,
                         content: KeywordCollectionContent, aweme: Aweme,
-                        proxy: str) -> None:
+                        proxy: str, *, account=None, identity=None) -> None:
         if not job.download_media or not aweme.medias or content.download_status == "done":
             return
         with get_session() as session:
@@ -654,15 +744,25 @@ class KeywordCollector:
             Path(self.cfg.engine.media_dir) / "keyword-collections"
         base_dir = root / f"job_{job.id}" / safe_title(content.keyword)
         routed_proxy = proxy if self.cfg.engine.route_download_via_proxy else ""
+        download_ua = str(getattr(identity, "ua", "") or "")
+        download_cookies = None
+        download_referer = ""
+        if job.platform == "tiktok" and account is not None:
+            download_ua, download_cookies = _tiktok_download_session(
+                account, identity, self.cfg.engine.user_agent)
+            download_referer = aweme.source_url or "https://www.tiktok.com/"
         ok, local_path, error = await self.downloader.download_aweme(
-            aweme, str(base_dir), routed_proxy)
+            aweme, str(base_dir), routed_proxy,
+            user_agent=download_ua,
+            cookies=download_cookies,
+            referer=download_referer,
+        )
         with get_session() as session:
             row = session.get(KeywordCollectionContent, content.id)
             if row:
                 row.download_status = "done" if ok else "failed"
                 row.local_path = local_path
-                if error:
-                    row.error = (row.error + "; " if row.error else "") + error
+                row.error = _content_error_after_download(row.error, error)
                 session.add(row)
                 session.commit()
         if not ok:
@@ -805,6 +905,54 @@ class KeywordCollector:
             parsed = [item for item in parsed if not item.get("reply_to")]
         return self._dedupe_comments(parsed, limit), error
 
+    async def _tiktok_comments(self, identity, aweme_id: str, limit: int,
+                               include_replies: bool, *, author_unique_id: str = "",
+                               target_url: str = "", account=None) -> tuple[list[dict], str]:
+        if limit <= 0:
+            return [], ""
+        mode = str(getattr(self.cfg.engine, "tiktok_read_mode", "native") or "native")
+        if mode == "native" and account is None:
+            return [], "TikTok 离线评论读取缺少账号会话"
+        if mode in {"auto", "native"} and account is not None:
+            client = TikTokNativeClient(
+                storage_state=getattr(account, "storage_state", "") or "",
+                user_agent=identity.ua,
+                proxy=identity.proxy,
+                locale=identity.locale,
+                timezone=identity.timezone_id,
+                viewport=(identity.viewport_w, identity.viewport_h),
+                region="US",
+                device_seed=identity.fp_seed or str(identity.account_id or "creatorhub"),
+                timeout=max(10, int(self.cfg.engine.request_timeout_seconds)),
+            )
+            native = await client.comments(
+                aweme_id, count=limit, include_replies=include_replies,
+                author_unique_id=author_unique_id, target_url=target_url)
+            if native.items or native.compatible or mode == "native":
+                parsed = [
+                    item for item in
+                    (parse_tiktok_comment(value) for value in native.items)
+                    if item
+                ]
+                if not include_replies:
+                    parsed = [item for item in parsed if not item.get("reply_to")]
+                return self._dedupe_comments(parsed, limit), native.error
+            print(
+                f"[tiktok-comments] 离线接口兼容失败，页面回退: "
+                f"{native.category}; HTTP={native.http_status}; "
+                f"bytes={native.body_length}; tt_orcas_res={native.tt_orcas_res!r}"
+            )
+        raw, error = await fetch_tiktok_comments(
+            self.browser, identity, aweme_id, set(), max_comments=limit,
+            max_scrolls=max(1, min(20, math.ceil(limit / 10) + 1)),
+            include_replies=include_replies,
+            block_media=self.cfg.engine.block_media_resources,
+            author_unique_id=author_unique_id, target_url=target_url)
+        parsed = [item for item in (parse_tiktok_comment(value) for value in raw) if item]
+        if not include_replies:
+            parsed = [item for item in parsed if not item.get("reply_to")]
+        return self._dedupe_comments(parsed, limit), error
+
     @staticmethod
     def _dedupe_comments(values: list[dict], limit: int) -> list[dict]:
         found: dict[str, dict] = {}
@@ -911,6 +1059,18 @@ class KeywordCollector:
         if job.platform == "kuaishou":
             return await self._run_keywords(
                 job_id, job, account, keywords, proxy, identity=identity)
+        if job.platform == "tiktok":
+            mode = str(getattr(self.cfg.engine, "tiktok_read_mode", "native") or "native")
+            if mode == "browser":
+                self._progress(job_id, step="启动 TikTok 可见采集窗口")
+                async with self.browser.temporary_headed_context(identity) as context:
+                    return await self._run_keywords(
+                        job_id, job, account, keywords, proxy,
+                        identity=identity, context=context)
+            self._progress(job_id, step="启动 TikTok 离线签名 API 采集")
+            return await self._run_keywords(
+                job_id, job, account, keywords, proxy,
+                identity=identity, context=None)
         if job.platform == "shipinhao":
             return await self._run_keywords(
                 job_id, job, account, keywords, proxy, identity=identity)
@@ -948,6 +1108,8 @@ class KeywordCollector:
                     self.cfg.engine.xhs_keyword_gap_seconds)
             elif job.platform == "kuaishou" and keyword_index:
                 await asyncio.sleep(0.8 * random.uniform(1.0, 1.35))
+            elif job.platform == "tiktok" and keyword_index:
+                await asyncio.sleep(1.0 * random.uniform(1.0, 1.35))
             self._progress(
                 job_id,
                 keyword=keyword,
@@ -971,6 +1133,9 @@ class KeywordCollector:
                 else:
                     raw_items, search_error = await self._discover_ks(
                         account, keyword, job)
+            elif job.platform == "tiktok":
+                raw_items, search_error = await self._discover_tiktok(
+                    account, identity, keyword, job)
             elif job.platform == "shipinhao":
                 raw_items, search_error = await self._discover_channels_account(
                     identity, job)
@@ -1054,6 +1219,9 @@ class KeywordCollector:
                     if aweme is not None and not aweme.author_name:
                         aweme.author_name = str(getattr(account, "nickname", "") or "")
                     token = ""
+                elif job.platform == "tiktok":
+                    aweme = parse_tiktok_aweme(raw, job.video_quality or "highest")
+                    token = ""
                 elif browser_reads:
                     aweme, parts, detail_error = \
                         await self._materialize_xhs_browser(identity, raw)
@@ -1086,7 +1254,7 @@ class KeywordCollector:
                 if aweme is None:
                     self._record_error(job_id, f"{keyword}: 无法解析一条搜索结果")
                     continue
-                if job.platform in {"xhs", "kuaishou", "shipinhao"} and not \
+                if job.platform in {"xhs", "kuaishou", "shipinhao", "tiktok"} and not \
                         _collection_content_matches(aweme, job):
                     continue
 
@@ -1105,7 +1273,9 @@ class KeywordCollector:
 
                 if job.download_media:
                     self._progress(job_id, keyword=keyword, step=f"下载作品 {index}")
-                    await self._download(current, content, aweme, proxy)
+                    await self._download(
+                        current, content, aweme, proxy,
+                        account=account, identity=identity)
 
                 should_collect_comments = (
                     job.max_comments_per_content > 0
@@ -1126,6 +1296,12 @@ class KeywordCollector:
                         comments, comment_error = await self._channels_comments(
                             identity, aweme.aweme_id,
                             job.max_comments_per_content, job.include_replies)
+                    elif job.platform == "tiktok":
+                        comments, comment_error = await self._tiktok_comments(
+                            identity, aweme.aweme_id,
+                            job.max_comments_per_content, job.include_replies,
+                            author_unique_id=aweme.author_unique_id,
+                            target_url=aweme.source_url, account=account)
                     elif browser_reads:
                         comments, comment_error = await self._xhs_comments_browser(
                             identity, aweme.aweme_id, token, source,
@@ -1139,7 +1315,7 @@ class KeywordCollector:
                     if comment_error:
                         self._record_error(
                             job_id, f"{keyword}/{aweme.aweme_id}: {comment_error}")
-                        if job.platform in {"xhs", "kuaishou", "shipinhao"} and classify_platform_error(
+                        if job.platform in {"xhs", "kuaishou", "shipinhao", "tiktok"} and classify_platform_error(
                                 comment_error)[0] in {
                                 RiskCategory.RISK, RiskCategory.AUTH,
                                 RiskCategory.NETWORK}:

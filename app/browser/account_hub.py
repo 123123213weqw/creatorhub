@@ -257,6 +257,26 @@ def _norm_channels_work(it: dict) -> Optional[dict]:
     }
 
 
+def _norm_tiktok_work(it: dict) -> Optional[dict]:
+    from ..platforms.tiktok import parse_tiktok_aweme
+    aweme = parse_tiktok_aweme(it)
+    if aweme is None:
+        return None
+    return {
+        "item_id": aweme.aweme_id,
+        "desc": aweme.desc,
+        "media_type": aweme.media_type,
+        "cover_url": aweme.cover,
+        "create_time": aweme.create_time,
+        "like_count": aweme.like_count,
+        "comment_count": aweme.comment_count,
+        "collect_count": 0,
+        "share_count": 0,
+        "play_count": 0,
+        "status": "",
+    }
+
+
 async def fetch_account_works(mgr: BrowserManager, identity, platform: str, uid: str,
                               max_scrolls: int = 14) -> Tuple[List[dict], str]:
     """抓取登录账号自己发布的作品(复用各平台已有的主页拦截抓取)。
@@ -290,6 +310,11 @@ async def fetch_account_works(mgr: BrowserManager, identity, platform: str, uid:
             items, _author, err = await fetch_channels_works(mgr, identity, known,
                                                              max_scrolls=max_scrolls)
             norm = _norm_channels_work
+        elif platform == "tiktok":
+            from .tiktok_fetcher import fetch_tiktok_profile_works
+            items, err = await fetch_tiktok_profile_works(
+                mgr, identity, uid, max_scrolls=max_scrolls)
+            norm = _norm_tiktok_work
         elif platform == "xhs":
             items, _author, err = await fetch_xhs_notes(mgr, identity, uid, known,
                                                         xsec_token="",

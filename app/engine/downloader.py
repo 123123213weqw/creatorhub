@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Mapping, Optional, Tuple
 from weakref import WeakValueDictionary
 
 import httpx
@@ -35,7 +35,10 @@ class Downloader:
         return f"{aweme.aweme_id}_{title}.{m.ext}"
 
     async def download_aweme(self, aweme: Aweme, base_dir: str = "",
-                             proxy: str = "") -> Tuple[bool, str, str]:
+                             proxy: str = "", *,
+                             user_agent: str = "",
+                             cookies: Mapping[str, str] | None = None,
+                             referer: str = "") -> Tuple[bool, str, str]:
         """下载一条作品的全部媒体(并发)。返回 (ok, local_path, error)。
         proxy 非空时,媒体拉流走该账号专属代理,避免 CDN 拉流暴露宿主真实 IP。"""
         from ..browser.manager import normalize_proxy
@@ -43,14 +46,21 @@ class Downloader:
         out_dir = self._target_dir(aweme.author_name, base_dir)
         title = safe_title(aweme.desc) or aweme.aweme_id
         _pf = getattr(aweme, "platform", "douyin")
-        referer = ("https://www.xiaohongshu.com/" if _pf == "xhs"
-                   else "https://www.kuaishou.com/" if _pf == "kuaishou"
-                   else "https://www.douyin.com/")
-        headers = {"User-Agent": self.ua, "Referer": referer}
+        platform_referer = (
+            "https://www.xiaohongshu.com/" if _pf == "xhs" else
+            "https://www.kuaishou.com/" if _pf == "kuaishou" else
+            "https://www.tiktok.com/" if _pf == "tiktok" else
+            "https://www.douyin.com/"
+        )
+        headers = {
+            "User-Agent": str(user_agent or self.ua),
+            "Referer": str(referer or platform_referer),
+        }
 
         try:
             async with httpx.AsyncClient(timeout=self.timeout, follow_redirects=True,
-                                         headers=headers, proxy=proxy or None) as cli:
+                                         headers=headers, proxy=proxy or None,
+                                         cookies=dict(cookies or {})) as cli:
                 async def fetch(m):
                     fpath = out_dir / self._filename(aweme, m, title)
                     # 多账号监控可能下载同一作品；同一路径只留一个写入者，

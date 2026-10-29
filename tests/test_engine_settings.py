@@ -86,6 +86,14 @@ def test_default_xhs_read_mode_is_api_direct():
     assert "默认使用 API 直连" in help_text
 
 
+def test_default_tiktok_read_mode_is_native_first():
+    assert EngineConfig().tiktok_read_mode == "native"
+    html = (Path(__file__).parents[1] / "app" / "web" / "index.html").read_text(encoding="utf-8")
+    control = html.split('id="engine-tiktok_read_mode"', 1)[1].split("</select>", 1)[0]
+    assert control.index('<option value="native">') < control.index('<option value="auto">')
+    assert "不打开浏览器" in control
+
+
 def test_default_douyin_write_mode_is_labeled_api_first():
     assert EngineConfig().douyin_write_mode == "hybrid"
     html = (Path(__file__).parents[1] / "app" / "web" / "index.html").read_text(encoding="utf-8")
@@ -125,7 +133,7 @@ def test_all_supported_values_and_live_downloader(local_project, monkeypatch):
     monkeypatch.setattr(main, "engine", engine)
     payload = {
         "xhs_read_mode": "api", "monitor_initial_backfill_count": -1,
-        "douyin_read_mode": "hybrid",
+        "douyin_read_mode": "hybrid", "tiktok_read_mode": "native",
         "douyin_profile_mode": "api", "douyin_followers_mode": "hybrid",
         "douyin_dm_sync_mode": "browser", "douyin_creator_danmaku_mode": "browser",
         "douyin_publish_mode": "browser",
@@ -169,7 +177,7 @@ def test_all_supported_values_and_live_downloader(local_project, monkeypatch):
 
 INVALID = [
     {"host": "0.0.0.0"}, {"profiles_dir": "arbitrary-directory"}, {"ai_api_key": "do-not-echo-fixture"},
-    {"xhs_read_mode": "unknown"}, {"douyin_read_mode": "invalid"}, {"douyin_write_mode": "invalid"},
+    {"xhs_read_mode": "unknown"}, {"douyin_read_mode": "invalid"}, {"tiktok_read_mode": "invalid"}, {"douyin_write_mode": "invalid"},
     {"douyin_profile_mode": "invalid"}, {"douyin_followers_mode": "invalid"},
     {"douyin_dm_sync_mode": "invalid"}, {"douyin_creator_danmaku_mode": "invalid"},
     {"douyin_publish_mode": "invalid"},

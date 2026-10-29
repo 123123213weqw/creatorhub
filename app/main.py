@@ -13,7 +13,7 @@ import tempfile
 import threading
 import traceback
 import uuid
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from ipaddress import ip_address
 from pathlib import Path
 from typing import Any, Dict
@@ -35,6 +35,7 @@ from .browser import (BrowserManager, cookie_string_to_state,
                       interactive_xhs_login, interactive_xhs_creator_login,
                       interactive_ks_login, interactive_ks_creator_login,
                       interactive_channels_login, interactive_channels_creator_login,
+                      interactive_tiktok_login,
                       fetch_self_profile, fetch_xhs_self_profile,
                       fetch_xhs_note_detail, fetch_xhs_comments,
                        fetch_xhs_favorite_boards,
@@ -42,6 +43,11 @@ from .browser import (BrowserManager, cookie_string_to_state,
                       fetch_channels_self_profile,
                       fetch_account_works, fetch_follows, fetch_dm_conversations,
                       fetch_dm_history, fetch_douyin_account_works_api)
+from .browser.tiktok_fetcher import (
+    fetch_tiktok_self_profile,
+    fetch_tiktok_users,
+    probe_tiktok_protocol,
+)
 from .browser.backends import (
     ACCOUNT_BROWSER_BACKENDS, LOCAL_BACKEND, fingerprint_seed_u32,
     parse_extra_launch_args,
@@ -81,6 +87,12 @@ from .platforms.kuaishou import (resolve_ks_user_id, resolve_ks_photo_id,
                   parse_self_user as parse_ks_self_user,
                   MANAGE_URL as KS_MANAGE_URL)
 from .platforms.channels import parse_self_user as parse_channels_self_user
+from .platforms.tiktok import (
+    TikTokNativeClient,
+    native_protocol_summary,
+    parse_tiktok_app_context,
+)
+from .platforms.tiktok.urls import parse_video_reference
 from .engine import Downloader, MonitorEngine
 from .engine.share_downloader import (
     clean_platform_share_target,
@@ -851,6 +863,9 @@ async def _enrich_account_profile(account_id: int, state: str, *,
             # 视频号扫码授权后，服务端会话偶尔要数秒才在新页面中生效。
             # 单次打开被重定向到登录页不能立即把刚添加的账号判为失效。
             u, err = await _fetch_channels_profile_with_retry(identity)
+        elif platform == "tiktok":
+            u, err = await fetch_tiktok_self_profile(
+                browser, identity, block_media=True)
         else:
             mode = dy_transport["effective_mode"]
             u, err = None, ""
@@ -894,6 +909,16 @@ async def _enrich_account_profile(account_id: int, state: str, *,
                 p = parse_ks_self_user(u)
             elif platform == "shipinhao":
                 p = parse_channels_self_user(u)
+            elif platform == "tiktok":
+                p = {
+                    "nickname": u.get("nickname") or "",
+                    "sec_uid": u.get("sec_uid") or "",
+                    "douyin_id": u.get("unique_id") or "",
+                    "avatar": u.get("avatar") or "",
+                    "follower_count": int(u.get("follower_count") or 0),
+                    "following_count": int(u.get("following_count") or 0),
+                    "aweme_count": int(u.get("video_count") or 0),
+                }
             else:
                 p = parse_self_user(u)
             if p.get("nickname"):
@@ -901,7 +926,7 @@ async def _enrich_account_profile(account_id: int, state: str, *,
             acc.sec_uid = p.get("sec_uid") or acc.sec_uid
             acc.douyin_id = p.get("douyin_id") or acc.douyin_id
             acc.avatar = p.get("avatar") or acc.avatar
-            if platform == "kuaishou":
+            if platform in {"kuaishou", "tiktok"}:
                 # 快手资料接口会明确返回 0；不能用 ``or`` 保留旧值，否则
                 # 取消关注、删光作品等场景会让账号卡片一直显示过期数据。
                 acc.follower_count = int(p.get("follower_count") or 0)
@@ -1159,6 +1184,10 @@ async def _run_login(task_id: str, creator: bool = False, account_id: int | None
                 reauth_options = {"force_reauth": True} if account_id else {}
                 ok, state_json, nickname = await interactive_channels_login(
                     browser, identity, **reauth_options)
+            elif platform == "tiktok":
+                reauth_options = {"force_reauth": True} if account_id else {}
+                ok, state_json, nickname = await interactive_tiktok_login(
+                    browser, identity, **reauth_options)
             elif creator:
                 reauth_options = {"force_reauth": True} if account_id else {}
                 ok, state_json, nickname = await interactive_creator_login(
@@ -1175,12 +1204,28 @@ async def _run_login(task_id: str, creator: bool = False, account_id: int | None
         # 3) 仅在成功时落库
         if ok and state_json:
             is_xhs = platform == "xhs"
+            is_tiktok = platform == "tiktok"
             observed_profile = {}
             if is_xhs and not creator:
                 raw_observed = getattr(
                     identity, "observed_login_profile", {}) or {}
                 if isinstance(raw_observed, dict):
                     observed_profile = parse_xhs_self_user(raw_observed)
+            elif is_tiktok:
+                raw_observed = getattr(
+                    identity, "observed_login_profile", {}) or {}
+                if isinstance(raw_observed, dict):
+                    parsed = parse_tiktok_app_context(raw_observed) or {}
+                    observed_profile = {
+                        "nickname": parsed.get("nickname", ""),
+                        "uid": parsed.get("uid", ""),
+                        "sec_uid": parsed.get("sec_uid", ""),
+                        "douyin_id": parsed.get("unique_id", ""),
+                        "avatar": parsed.get("avatar", ""),
+                        "follower_count": parsed.get("follower_count", 0),
+                        "following_count": parsed.get("following_count", 0),
+                        "aweme_count": parsed.get("video_count", 0),
+                    }
             with get_session() as s:
                 if account_id:
                     acc = s.get(DouyinAccount, acc_id)
@@ -1189,6 +1234,7 @@ async def _run_login(task_id: str, creator: bool = False, account_id: int | None
                         platform=platform,
                         nickname=(observed_profile.get("nickname")
                                   or nickname or nm),
+                        uid=observed_profile.get("uid", ""),
                         sec_uid=observed_profile.get("sec_uid", ""),
                         douyin_id=observed_profile.get("douyin_id", ""),
                         avatar=observed_profile.get("avatar", ""),
@@ -1261,6 +1307,7 @@ async def _run_login(task_id: str, creator: bool = False, account_id: int | None
                         observed_profile.get("nickname") or acc.nickname)
                     acc.sec_uid = (
                         observed_profile.get("sec_uid") or acc.sec_uid)
+                    acc.uid = observed_profile.get("uid") or acc.uid
                     acc.douyin_id = (
                         observed_profile.get("douyin_id") or acc.douyin_id)
                     acc.avatar = observed_profile.get("avatar") or acc.avatar
@@ -1275,13 +1322,39 @@ async def _run_login(task_id: str, creator: bool = False, account_id: int | None
                 acc.status = "active"
                 s.add(acc); s.commit()
 
-            if fresh_account and platform == "xhs":
+            if fresh_account and platform in {"xhs", "tiktok"}:
                 # Promote the successful temporary login session to the new
                 # durable account id without closing/reopening Chromium.
                 rebound = getattr(browser, "rebind_context", None)
                 if callable(rebound):
                     await rebound(temporary_identity_key, acc_id)
                 identity.account_id = acc_id
+
+            # 登录时已经选定并实际使用代理。先明确标记为“已绑定待检测”，
+            # 再用同一个真实 BrowserContext 建立出口基线；探测失败不影响登录成功。
+            if identity.proxy:
+                with get_session() as s:
+                    acc = s.get(DouyinAccount, acc_id)
+                    if acc and acc.proxy_status == "unknown":
+                        acc.proxy_status = "bound"
+                        s.add(acc); s.commit()
+                try:
+                    browser_exit = await browser.probe_browser_exit(
+                        identity, timeout_ms=12000)
+                    with get_session() as s:
+                        acc = s.get(DouyinAccount, acc_id)
+                        if acc:
+                            acc.proxy_status = "ok"
+                            acc.exit_ip = browser_exit.get("ip", "")
+                            acc.exit_country = browser_exit.get("country", "")
+                            acc.exit_asn = browser_exit.get("asn", "")
+                            acc.exit_timezone = browser_exit.get("timezone", "")
+                            acc.exit_proxy_signature = browser.proxy_signature(
+                                identity.proxy)
+                            acc.exit_checked_at = datetime.utcnow()
+                            s.add(acc); s.commit()
+                except Exception as exc:
+                    print(f"[login-proxy] account={acc_id} probe deferred: {exc!r}")
 
             # 登录态已经持久化且账号已经落库：立即通知前端把账号显示出来。
             # 完整资料抓取可能还需数秒，不能让它阻塞“扫码成功”的交互反馈。
@@ -1575,6 +1648,32 @@ async def login_channels_start(proxy: str = "auto", browser_backend: str = "defa
             "hint": "已打开视频号助手窗口,请用微信扫码登录"}
 
 
+@app.post("/api/login/tiktok/start")
+async def login_tiktok_start(proxy: str = "auto", browser_backend: str = "default",
+                             browser_runtime_id: str = "",
+                             fingerprint: dict[str, Any] | None = None):
+    """TikTok Web 登录；页面内动态签名和后续读写共用此 Profile。"""
+    if browser is None:
+        raise HTTPException(503, "浏览器未就绪")
+    browser_backend, browser_runtime_id = _validate_login_browser_backend(
+        browser_backend, browser_runtime_id)
+    fingerprint_overrides = _validate_prelogin_fingerprint(
+        fingerprint, browser_backend, browser_runtime_id)
+    reused = await _reuse_or_reject_interactive_login("tiktok", False)
+    if reused is not None:
+        return reused
+    task_id = uuid.uuid4().hex
+    login_tasks[task_id] = _login_task_state(
+        status="opening", platform="tiktok", creator=False, account_id=None)
+    asyncio.create_task(_run_login(
+        task_id, platform="tiktok", proxy_choice=proxy,
+        browser_backend=browser_backend,
+        browser_runtime_id=browser_runtime_id,
+        fingerprint_overrides=fingerprint_overrides))
+    return {"task_id": task_id, "status": "opening",
+            "hint": "已打开 TikTok 窗口，请完成登录"}
+
+
 @app.get("/api/login/browser/poll")
 async def login_browser_poll(task_id: str):
     info = login_tasks.get(task_id)
@@ -1610,7 +1709,7 @@ async def login_cookie(body: CookieIn):
 
 @app.get("/api/overview/summary")
 async def overview_summary(platform: str = "douyin"):
-    if platform not in {"douyin", "xhs", "kuaishou", "shipinhao"}:
+    if platform not in {"douyin", "xhs", "kuaishou", "shipinhao", "tiktok"}:
         raise HTTPException(422, "平台类型无效")
     with get_session() as session:
         def count(model, *conditions):
@@ -2151,9 +2250,12 @@ def _account_risk_view(account: DouyinAccount, now: datetime, *,
     elif account.status == "invalid":
         status_code, status_label, status_tone = "auth_invalid", "登录失效", "danger"
         reason = "账号登录态已失效，需要重新登录"
-    elif account.proxy_status in {"bad", "auth_error", "blocked", "drifted"}:
+    elif account.proxy_status in {"bad", "auth_error", "blocked"}:
         status_code, status_label, status_tone = "proxy_error", "代理异常", "danger"
-        reason = account.write_pause_reason or "账号绑定代理不可用或出口发生漂移"
+        reason = account.write_pause_reason or "账号绑定代理不可用"
+    elif account.proxy_status in {"rotating", "drifted"}:
+        status_code, status_label, status_tone = "proxy_rotation", "代理出口变化", "warn"
+        reason = "代理连接正常，但服务商分配了新的出口 IP"
     elif cooldown_until and cooldown_until > now:
         if "出口组熔断" in reason:
             status_code, status_label = "network_circuit", "网络熔断"
@@ -2380,7 +2482,7 @@ async def probe_account_risk(account_id: int, request: Request):
             recovered = bool(state is not None and state.risk_level == 0
                              and account and account.status == "active"
                              and account.proxy_status not in {
-                                 "bad", "auth_error", "blocked", "drifted"})
+                                 "bad", "auth_error", "blocked"})
         if recovered:
             woken = engine._wake_deferred_tasks(account_id)
     _record_risk_admin_audit(
@@ -3387,7 +3489,7 @@ async def sync_account_works(account_id: int):
         if engine._proxy_bad(acc):
             raise HTTPException(400, "账号代理不可用")
         platform = acc.platform
-        uid = acc.sec_uid or ""
+        uid = (acc.douyin_id if platform == "tiktok" else acc.sec_uid) or ""
         transport = (resolve_transport(cfg, "douyin", "account_works", acc)
                      if platform == "douyin" else None)
         effective_mode = transport["effective_mode"] if transport else "browser"
@@ -4526,7 +4628,8 @@ async def cancel_account_action(task_id: int):
 
 
 _PLATFORM_HOST = {"douyin": "douyin.com", "xhs": "xiaohongshu.com",
-                  "kuaishou": "kuaishou.com", "shipinhao": "weixin.qq.com"}
+                  "kuaishou": "kuaishou.com", "shipinhao": "weixin.qq.com",
+                  "tiktok": "tiktok.com"}
 _XHS_USER_ME_API = "/api/sns/web/v2/user/me"
 
 
@@ -4578,6 +4681,21 @@ async def _opened_page_login_state(page, platform: str,
     if platform == "douyin":
         visible = await douyin_login_prompt_visible(page)
         return "logged_out" if visible is True else "unconfirmed"
+    if platform == "tiktok":
+        if "/login" in current_url or "login?" in current_url:
+            return "logged_out"
+        try:
+            context = await page.evaluate("""() => {
+              const el = document.getElementById('__UNIVERSAL_DATA_FOR_REHYDRATION__');
+              if (!el || !el.textContent) return null;
+              try { return JSON.parse(el.textContent).__DEFAULT_SCOPE__?.['webapp.app-context'] || null; }
+              catch (_) { return null; }
+            }""")
+        except Exception:
+            context = None
+        user = context.get("user") if isinstance(context, dict) else None
+        return "authenticated" if isinstance(user, dict) and (
+            user.get("uniqueId") or user.get("uid")) else "unconfirmed"
     if platform == "xhs_creator":
         if "passport" in current_url:
             return "logged_out"
@@ -4660,6 +4778,7 @@ async def open_account_browser(
                      # 显示成“未确认”。首页会加载权威的当前用户接口。
                      else "https://www.xiaohongshu.com/"),
             "kuaishou": "https://www.kuaishou.com/",
+            "tiktok": "https://www.tiktok.com/",
             "shipinhao": "https://channels.weixin.qq.com/platform"}.get(
                 platform, "https://www.douyin.com/")
     # 传了 url 且属于本平台域名 -> 停在该地址(否则回首页,防被当跳转开任意站)
@@ -4779,6 +4898,7 @@ async def open_account_browser(
     check_opened = False
     check_error = ""
     check_page = None
+    ctx = None
     try:
         await startup_guard.__aenter__()
         startup_entered = True
@@ -4846,6 +4966,9 @@ async def open_account_browser(
                 except Exception:
                     pass
     except BaseException as e:
+        if ctx is not None:
+            with suppress(Exception):
+                await browser.close_context(identity.key)
         if startup_entered:
             await startup_guard.__aexit__(type(e), e, e.__traceback__)
         await guard.__aexit__(type(e), e, e.__traceback__)
@@ -4857,10 +4980,10 @@ async def open_account_browser(
     except BaseException as e:
         await guard.__aexit__(type(e), e, e.__traceback__)
         raise
-    close_callback = (
-        (lambda: browser.close_context(identity.key))
-        if platform == "xhs" else None
-    )
+    # All headed account contexts are manager-owned. Releasing the manual
+    # window through BrowserManager also removes its cache/signature entries, so
+    # the next background read cannot reuse an already-closed context.
+    close_callback = lambda: browser.close_context(identity.key)
     lease = _OpenBrowserLease(
         ctx, guard, close_callback=close_callback, page=page)
     open_browsers[account_id] = lease
@@ -4987,6 +5110,7 @@ async def _probe_proxy(url: str, platform: str = "douyin", timeout: float = 15):
         return False, "未配置代理"
     test_url = ("https://www.xiaohongshu.com/" if platform == "xhs"
                 else "https://www.kuaishou.com/" if platform == "kuaishou"
+                else "https://www.tiktok.com/" if platform == "tiktok"
                 else "https://channels.weixin.qq.com/" if platform == "shipinhao"
                 else "https://www.douyin.com/")
     try:
@@ -5192,20 +5316,22 @@ async def test_account_proxy(account_id: int):
                          and acc.exit_asn != browser_exit["asn"]),
                 ))
                 if drift:
-                    acc.proxy_status = "drifted"
+                    acc.proxy_status = "rotating"
                     detail = (
-                        f"浏览器出口漂移: 基线 {acc.exit_ip or '-'} / "
+                        f"代理可用（轮换出口）: 上次 {acc.exit_ip or '-'} / "
                         f"{acc.exit_asn or '-'}, 当前 {browser_exit['ip']} / "
                         f"{browser_exit['asn'] or '-'}")
-                    ok = False
                 else:
                     acc.proxy_status = "ok"
-                    acc.exit_ip = browser_exit["ip"]
-                    acc.exit_country = browser_exit["country"]
-                    acc.exit_asn = browser_exit["asn"]
-                    acc.exit_timezone = browser_exit["timezone"]
-                    acc.exit_proxy_signature = signature
-                    acc.exit_checked_at = datetime.utcnow()
+                # A successful browser probe is authoritative for reachability.
+                # Rotating residential/mobile proxies legitimately change IP;
+                # persist the new exit but do not block reads or writes.
+                acc.exit_ip = browser_exit["ip"]
+                acc.exit_country = browser_exit["country"]
+                acc.exit_asn = browser_exit["asn"]
+                acc.exit_timezone = browser_exit["timezone"]
+                acc.exit_proxy_signature = signature
+                acc.exit_checked_at = datetime.utcnow()
             else:
                 acc.proxy_status = _proxy_status_from_detail(ok, detail)
             s.add(acc); s.commit()
@@ -6712,12 +6838,150 @@ class KeywordCollectionIn(BaseModel):
     download_dir: str = ""
 
 
+class TikTokUserSearchIn(BaseModel):
+    account_id: int
+    keyword: str
+    max_results: int = PydanticField(default=50, ge=1, le=200)
+
+
+class TikTokProtocolProbeIn(BaseModel):
+    account_id: int
+    keyword: str = "claude"
+    timeout_ms: int = PydanticField(default=20000, ge=3000, le=45000)
+    mode: str = "auto"
+
+
+class TikTokCommentTaskIn(BaseModel):
+    account_id: int
+    aweme_id: str = ""
+    author_unique_id: str = ""
+    content: str
+    target_comment_id: str = ""
+    target_text: str = ""
+    target_nick: str = ""
+    run_now: bool = False
+
+
+@app.post("/api/tiktok/users/search")
+async def search_tiktok_users(body: TikTokUserSearchIn):
+    keyword = body.keyword.strip()
+    if not keyword:
+        raise HTTPException(422, "请输入用户关键词")
+    if browser is None:
+        raise HTTPException(503, "浏览器未就绪")
+    with get_session() as session:
+        account = session.get(DouyinAccount, body.account_id)
+        if (not account or account.platform != "tiktok"
+                or account.status != "active" or not account.storage_state):
+            raise HTTPException(400, "请选择有效的 TikTok 登录账号")
+        identity = browser.identity_for(account)
+    items, error = await fetch_tiktok_users(
+        browser, identity, keyword, max_results=body.max_results,
+        block_media=cfg.engine.block_media_resources)
+    return {"items": items, "error": error}
+
+
+@app.post("/api/tiktok/protocol/probe")
+async def tiktok_protocol_probe(body: TikTokProtocolProbeIn):
+    if browser is None:
+        raise HTTPException(503, "浏览器未就绪")
+    keyword = body.keyword.strip() or "claude"
+    mode = str(body.mode or "auto").strip().lower()
+    if mode not in {"auto", "native", "browser"}:
+        raise HTTPException(422, "mode 仅支持 auto/native/browser")
+    with get_session() as session:
+        account = session.get(DouyinAccount, body.account_id)
+        if (not account or account.platform != "tiktok"
+                or account.status != "active" or not account.storage_state):
+            raise HTTPException(400, "请选择有效的 TikTok 登录账号")
+        identity = browser.identity_for(account)
+        storage_state = account.storage_state
+    if mode in {"auto", "native"}:
+        client = TikTokNativeClient(
+            storage_state=storage_state,
+            user_agent=identity.ua,
+            proxy=identity.proxy,
+            locale=identity.locale,
+            timezone=identity.timezone_id,
+            viewport=(identity.viewport_w, identity.viewport_h),
+            region="US",
+            device_seed=identity.fp_seed or str(identity.account_id),
+            timeout=max(3, body.timeout_ms / 1000),
+        )
+        native = await client.search(keyword, count=3)
+        result = {
+            **native_protocol_summary(),
+            "ok": bool(native.items) and not native.error,
+            "keyword": keyword,
+            "category": native.category,
+            "error": native.error,
+            "http_status": native.http_status,
+            "body_length": native.body_length,
+            "tt_orcas_res_present": bool(native.tt_orcas_res),
+            "result_count": len(native.items),
+            "signature_lengths": native.signature_lengths,
+            "sample_item_ids": [
+                str((row.get("item") or row.get("itemStruct") or row).get("id") or "")
+                for row in native.items[:3]
+            ],
+        }
+        if native.items or mode == "native" or native.category == "empty_valid":
+            return result
+    async with browser.temporary_headed_context(identity):
+        result = await probe_tiktok_protocol(
+            browser, identity, keyword, timeout_ms=body.timeout_ms)
+    result["fallback_from"] = "native_api" if mode == "auto" else ""
+    return result
+
+
+@app.post("/api/tiktok/comment-tasks")
+async def create_tiktok_comment_task(body: TikTokCommentTaskIn):
+    ref = parse_video_reference(body.aweme_id, body.author_unique_id)
+    content = body.content.strip()
+    if not ref:
+        raise HTTPException(422, "请输入完整 TikTok 作品链接，或同时填写作品 ID 与作者 @username")
+    aweme_id = ref.aweme_id
+    if not content:
+        raise HTTPException(422, "评论内容为必填")
+    if body.target_comment_id and not body.target_text.strip():
+        raise HTTPException(422, "回复任务需提供目标评论原文以定位回复区")
+    with get_session() as session:
+        account = session.get(DouyinAccount, body.account_id)
+        if (not account or account.platform != "tiktok"
+                or account.status != "active" or not account.storage_state):
+            raise HTTPException(400, "请选择有效的 TikTok 登录账号")
+        task = CommentTask(
+            platform="tiktok", account_id=body.account_id,
+            aweme_id=aweme_id, target_url=ref.url, content=content,
+            target_comment_id=body.target_comment_id.strip(),
+            target_text=body.target_text.strip(),
+            target_nick=body.target_nick.strip(),
+            status="pending", scheduled_at=datetime.utcnow(),
+        )
+        session.add(task); session.commit(); session.refresh(task)
+        payload = _task_dict(task)
+    record_account_operation(
+        platform="tiktok", account_id=body.account_id,
+        task_type="comments", task_id=task.id, action="queued",
+        status="pending", target=aweme_id, channel="queue")
+    if body.run_now:
+        if engine is None:
+            raise HTTPException(503, "引擎未就绪")
+        result = await engine.execute_comment_task(task.id)
+        with get_session() as session:
+            current = session.get(CommentTask, task.id)
+            payload = _task_dict(current) if current else payload
+        payload["ran"] = bool(result.get("ok"))
+        payload["execution_error"] = result.get("error") or payload.get("error") or ""
+    return payload
+
+
 def _validated_collection_input(body: KeywordCollectionIn) \
         -> tuple[str, list[str], str, str, dict]:
     """校验创建/编辑共用的任务配置并返回规范化值。"""
     platform = body.platform.strip().lower()
-    if platform not in {"douyin", "xhs", "kuaishou", "shipinhao"}:
-        raise HTTPException(400, "批量采集仅支持抖音、小红书、快手或视频号")
+    if platform not in {"douyin", "xhs", "kuaishou", "shipinhao", "tiktok"}:
+        raise HTTPException(400, "批量采集仅支持抖音、小红书、快手、视频号或 TikTok")
     source_type = body.source_type.strip().lower() or "keyword"
     if source_type not in {
             "keyword", "favorite_all", "favorite_board", "creator",
@@ -6727,6 +6991,8 @@ def _validated_collection_input(body: KeywordCollectionIn) \
         raise HTTPException(400, "视频号批量采集仅支持当前登录账号的本账号作品")
     if platform != "shipinhao" and source_type == "account_works":
         raise HTTPException(400, "本账号作品来源仅支持视频号")
+    if platform == "tiktok" and source_type != "keyword":
+        raise HTTPException(400, "TikTok 首版批量采集仅支持关键词视频搜索")
     if source_type in {"favorite_all", "favorite_board"} and platform != "xhs":
         raise HTTPException(400, "收藏来源仅支持小红书")
     source_ref = body.source_ref.strip()
@@ -6973,6 +7239,8 @@ def _collection_content_dict(row: KeywordCollectionContent) -> dict:
         url = f"https://www.kuaishou.com/short-video/{row.aweme_id}"
     elif row.platform == "shipinhao":
         url = "https://channels.weixin.qq.com/platform/post/list"
+    elif row.platform == "tiktok":
+        url = row.source_url or ""
     else:
         url = f"https://www.douyin.com/video/{row.aweme_id}"
     local_files = _collection_local_media_paths(row)
@@ -7195,7 +7463,7 @@ async def list_keyword_collections(platform: str | None = None, limit: int = 100
     limit = max(1, min(limit, 300))
     with get_session() as session:
         stmt = select(KeywordCollectionJob)
-        if platform in {"douyin", "xhs", "kuaishou", "shipinhao"}:
+        if platform in {"douyin", "xhs", "kuaishou", "shipinhao", "tiktok"}:
             stmt = stmt.where(KeywordCollectionJob.platform == platform)
         rows = session.exec(
             stmt.order_by(KeywordCollectionJob.created_at.desc()).limit(limit)).all()
@@ -7266,6 +7534,10 @@ async def keyword_collection_content_media(job_id: int, content_id: int):
             "local_url": local_video["url"] if local_video else "",
             "source_url": (f"https://www.xiaohongshu.com/explore/{row.aweme_id}"
                            if row.platform == "xhs"
+                           else row.source_url
+                           if row.platform == "tiktok"
+                           else f"https://www.kuaishou.com/short-video/{row.aweme_id}"
+                           if row.platform == "kuaishou"
                            else f"https://www.douyin.com/video/{row.aweme_id}"),
         }
 
@@ -10425,6 +10697,7 @@ def _task_dict(t: CommentTask) -> dict:
     return {
         "id": t.id, "platform": t.platform, "rule_id": t.rule_id,
         "account_id": t.account_id, "aweme_id": t.aweme_id,
+        "target_url": getattr(t, "target_url", ""),
         "target_comment_id": t.target_comment_id, "target_nick": t.target_nick,
         "target_text": getattr(t, "target_text", ""),
         "content": t.content, "status": t.status, "result": t.result,
@@ -10669,7 +10942,7 @@ class CommentBatchApproveIn(BaseModel):
 @app.post("/api/comment-tasks/batch-approve")
 async def batch_approve_comment_tasks(body: CommentBatchApproveIn):
     """Only approve an explicit, scope-checked selection, atomically."""
-    if body.platform not in {"douyin", "xhs", "kuaishou", "shipinhao"}:
+    if body.platform not in {"douyin", "xhs", "kuaishou", "shipinhao", "tiktok"}:
         raise HTTPException(422, "平台类型无效")
     ids = list(dict.fromkeys(body.ids))
     if not ids or any(value <= 0 for value in ids):

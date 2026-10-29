@@ -36,7 +36,8 @@ from .backends import (
 from .identity import Identity, fingerprint_script
 from .cdp import (CdpLaunchError, CdpProfileConflictError, CdpProxyError,
                   CdpProxyAuthController, XhsCdpBackend, profile_is_locked)
-from .proxy import ProxyConfigError, ProxyPlan, try_proxy_plan
+from .proxy import (HttpProxyAuthRelay, ProxyConfigError, ProxyPlan,
+                    try_proxy_plan)
 from .xhs_interaction import XhsInteractionPolicy, XhsVisibleActionGate
 
 _PROXY_WEBRTC_ARGS = [
@@ -289,6 +290,7 @@ class BrowserManager:
         self._runtime_by_key: Dict[Any, str] = {}
         self._fallback_reason_by_key: Dict[Any, str] = {}
         self._proxy_signature_by_key: Dict[Any, str] = {}
+        self._proxy_relays: Dict[Any, HttpProxyAuthRelay] = {}
         self._profile_process_locks: Dict[Any, _ProfileProcessLock] = {}
         self._cdp_backend = None
         self.xhs_interaction = XhsInteractionPolicy()
@@ -538,6 +540,7 @@ class BrowserManager:
 
     def _normalize_ua(self, ua: str) -> str:
         """把账号 UA 的 Chrome/Edg 大版本对齐到真实内核版本(未探测到则原样返回)。"""
+        ua = str(ua or "").replace("HeadlessChrome/", "Chrome/")
         if not self._chrome_major or not ua:
             return ua
         v = self._chrome_major
@@ -690,6 +693,11 @@ class BrowserManager:
             actual_ua = str(
                 await probe_page.evaluate("navigator.userAgent") or "").strip()
             if actual_ua:
+                # Never persist a background headless marker into the account
+                # identity. A later visible TikTok window would otherwise send
+                # HeadlessChrome in its override and the search page suppresses
+                # result APIs even though the window is visibly headed.
+                actual_ua = actual_ua.replace("HeadlessChrome/", "Chrome/")
                 identity.ua = actual_ua
                 if identity.account_id is not None and self._native_ua_callback:
                     self._native_ua_callback(identity.account_id, actual_ua)
@@ -948,7 +956,8 @@ class BrowserManager:
         proxy = str(getattr(account, "proxy", "") or "").strip()
         if not proxy or not self.native_write_require_verified_proxy:
             return ""
-        if getattr(account, "proxy_status", "unknown") != "ok":
+        if getattr(account, "proxy_status", "unknown") not in {
+                "ok", "rotating", "drifted"}:
             return "write_env_blocked:账号代理尚未通过浏览器出口验证"
         signature = self.proxy_signature(proxy)
         if not getattr(account, "exit_ip", "") \
@@ -1037,7 +1046,14 @@ class BrowserManager:
                 geolocation=identity.geolocation,
                 permissions=["geolocation"],
             )
-        proxy = _parse_proxy(identity.proxy)
+        proxy_plan = try_proxy_plan(identity.proxy)
+        proxy = proxy_plan.playwright() if proxy_plan else None
+        relay = None
+        if (proxy_plan is not None and proxy_plan.scheme in {"http", "https"}
+                and proxy_plan.authenticated):
+            relay = HttpProxyAuthRelay(proxy_plan)
+            await relay.start()
+            proxy = {"server": relay.chrome_server}
         if fingerprint_plan is not None:
             args = list(fingerprint_plan.args)
             args.append(
@@ -1067,6 +1083,9 @@ class BrowserManager:
         try:
             ctx = await self._pw.chromium.launch_persistent_context(**kwargs)
         except Exception as exc:
+            if relay is not None:
+                with suppress(Exception):
+                    await relay.close()
             # 浏览器可能在预检查之后、真正启动之前抢先取得原生锁。此时 Chrome
             # 会把启动转发给现有会话，Patchright 抛出 TargetClosedError。将其
             # 转换为明确的 Profile 冲突，避免向上层暴露误导性的自动化错误。
@@ -1078,8 +1097,14 @@ class BrowserManager:
                         f"Chrome profile is already in use: {pdir}") from exc
             self._release_profile_lock(identity.key)
             raise
+        if relay is not None:
+            previous = self._proxy_relays.pop(identity.key, None)
+            if previous is not None and previous is not relay:
+                with suppress(Exception):
+                    await previous.close()
+            self._proxy_relays[identity.key] = relay
         with suppress(Exception):
-            ctx.on("close", lambda *_: self._release_profile_lock(identity.key))
+            ctx.on("close", lambda *_: self._forget_closed_context(ctx))
         if not legacy:
             # Persist the UA exposed by this exact native context. It is
             # diagnostic state only; native launches still omit any override.
@@ -1175,6 +1200,7 @@ class BrowserManager:
         self._runtime_by_key.pop(key, None)
         self._fallback_reason_by_key.pop(key, None)
         self._proxy_signature_by_key.pop(key, None)
+        relay = self._proxy_relays.pop(key, None)
         try:
             if ctx is not None:
                 await self._flush_douyin_api_observer(key, ctx)
@@ -1186,6 +1212,31 @@ class BrowserManager:
                 with suppress(Exception):
                     await ctx.close()
         finally:
+            observer = self._douyin_api_observers.get(key)
+            if observer and observer[0] is ctx:
+                self._douyin_api_observers.pop(key, None)
+            if relay is not None:
+                with suppress(Exception):
+                    await relay.close()
+            self._release_profile_lock(key)
+
+    def _forget_closed_context(self, ctx: BrowserContext) -> None:
+        """Drop cache entries when callers close a managed context directly."""
+        keys = [key for key, value in self._contexts.items() if value is ctx]
+        for key in keys:
+            self._contexts.pop(key, None)
+            self._startup_pages.pop(key, None)
+            self._cdp_sessions.pop(key, None)
+            self._task_pages.pop(key, None)
+            self._last_used.pop(key, None)
+            self._backend_by_key.pop(key, None)
+            self._runtime_by_key.pop(key, None)
+            self._fallback_reason_by_key.pop(key, None)
+            self._proxy_signature_by_key.pop(key, None)
+            relay = self._proxy_relays.pop(key, None)
+            if relay is not None:
+                with suppress(RuntimeError):
+                    asyncio.create_task(relay.close())
             observer = self._douyin_api_observers.get(key)
             if observer and observer[0] is ctx:
                 self._douyin_api_observers.pop(key, None)
@@ -1218,6 +1269,7 @@ class BrowserManager:
                 self._runtime_by_key,
                 self._fallback_reason_by_key,
                 self._proxy_signature_by_key,
+                self._proxy_relays,
                 self._profile_process_locks,
             )
             for mapping in maps:
@@ -1765,7 +1817,15 @@ class BrowserManager:
         return await self.collect_idle_sessions(now=now)
 
     async def open_headed(self, identity: Identity) -> BrowserContext:
-        """Return the shared headed XHS context or a temporary legacy one."""
+        """Return one account-owned headed context.
+
+        Non-XHS accounts used to launch a visible context without registering it
+        in the manager cache. A manual account window could therefore keep the
+        persistent Profile locked while a background reader tried to launch a
+        second Chromium process for the same Profile. Registering the headed
+        context makes reads, account management and manual windows share the
+        already-authenticated session instead of failing with a Profile conflict.
+        """
         if identity.platform == "xhs":
             snapshot = capture_window_snapshot(CHROMIUM_WINDOW_CLASSES)
             ctx = await self.context_for(identity)
@@ -1775,6 +1835,27 @@ class BrowserManager:
         snapshot = capture_window_snapshot(CHROMIUM_WINDOW_CLASSES)
         await self.close_context(identity.key)
         ctx = await self._launch_persistent(identity, headless=False)
+        effective_backend = self.effective_browser_backend(identity)
+        runtime_id = (
+            self.effective_fingerprint_runtime_id(identity)
+            if effective_backend == FINGERPRINT_CHROMIUM_BACKEND else "")
+        proxy_signature = self.proxy_signature(identity.proxy)
+        async with self._cv_lock:
+            self._contexts[identity.key] = ctx
+            self._startup_pages[identity.key] = tuple(
+                page for page in (getattr(ctx, "pages", ()) or ())
+                if getattr(page, "url", "") == "about:blank")
+            self._last_used[identity.key] = time.time()
+            self._backend_by_key[identity.key] = (
+                FINGERPRINT_CHROMIUM_BACKEND
+                if effective_backend == FINGERPRINT_CHROMIUM_BACKEND
+                else "patchright")
+            if runtime_id:
+                self._runtime_by_key[identity.key] = runtime_id
+            self._proxy_signature_by_key[identity.key] = self._context_signature(
+                identity, effective_backend, runtime_id, proxy_signature)
+        with suppress(Exception):
+            ctx.on("close", lambda *_: self._forget_closed_context(ctx))
         await asyncio.to_thread(bring_window_to_front, snapshot,
                                 CHROMIUM_WINDOW_CLASSES, "", 1.5)
         return ctx
@@ -1788,11 +1869,7 @@ class BrowserManager:
                 ctx, identity, overwrite=True)
             yield ctx
         finally:
-            if identity.platform == "xhs":
-                await self.close_context(identity.key)
-            else:
-                with suppress(Exception):
-                    await ctx.close()
+            await self.close_context(identity.key)
 
     @asynccontextmanager
     async def temporary_fresh_headed_context(self, identity: Identity):

@@ -676,6 +676,63 @@ async def interactive_ks_creator_login(mgr: BrowserManager, identity: Identity,
     return logged, state_json, nickname
 
 
+async def interactive_tiktok_login(
+        mgr: BrowserManager, identity: Identity, timeout_seconds: int = 300,
+        force_reauth: bool = False) -> Tuple[bool, str, str]:
+    """TikTok Web visible login using the hydrated app context as authority."""
+    ctx = await mgr.open_headed(identity)
+    if force_reauth:
+        await ctx.clear_cookies()
+    await _open_first_environment_check(mgr, identity, ctx)
+    page = await ctx.new_page()
+    await _focus(page)
+    logged, nickname, state_json = False, "", ""
+    try:
+        await page.goto("https://www.tiktok.com/", wait_until="domcontentloaded", timeout=30000)
+        await _focus(page)
+        for selector in ('[data-e2e="top-login-button"]',
+                         'button[data-e2e="login-button"]',
+                         'button:has-text("Log in")'):
+            try:
+                await page.locator(selector).first.click(timeout=2000)
+                break
+            except Exception:
+                continue
+        waited = 0.0
+        while waited < timeout_seconds:
+            if page.is_closed():
+                break
+            try:
+                context = await page.evaluate("""() => {
+                  const el = document.getElementById('__UNIVERSAL_DATA_FOR_REHYDRATION__');
+                  if (!el || !el.textContent) return null;
+                  try { return JSON.parse(el.textContent).__DEFAULT_SCOPE__?.['webapp.app-context'] || null; }
+                  catch (_) { return null; }
+                }""")
+            except Exception:
+                context = None
+            user = context.get("user") if isinstance(context, dict) else None
+            if isinstance(user, dict) and (user.get("uniqueId") or user.get("uid")):
+                logged = True
+                try:
+                    identity.observed_login_profile = dict(context)
+                except Exception:
+                    pass
+                nickname = str(user.get("nickname") or user.get("uniqueId") or "")
+                break
+            await asyncio.sleep(0.5)
+            waited += 0.5
+        if logged:
+            await page.wait_for_timeout(800)
+            state_json = json.dumps(await ctx.storage_state())
+    finally:
+        try:
+            await ctx.close()
+        except Exception:
+            pass
+    return logged, state_json, nickname
+
+
 # ── 视频号(微信视频号 / finder)登录 ──
 # 视频号助手登录后写入的 Cookie(挂在 channels.weixin.qq.com / .weixin.qq.com)。
 # sessionid / _finder_auth 才能作为强登录信号。wxuin 在扫码授权过程尚未完成时

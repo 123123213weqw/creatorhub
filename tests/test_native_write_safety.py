@@ -65,6 +65,8 @@ class NativeWriteSafetyTests(unittest.TestCase):
         account.exit_proxy_signature = manager.proxy_signature(account.proxy)
         account.exit_checked_at = datetime.utcnow()
         self.assertEqual(manager.native_write_gate_error(account), "")
+        account.proxy_status = "rotating"
+        self.assertEqual(manager.native_write_gate_error(account), "")
 
         account.exit_checked_at = datetime.utcnow() - timedelta(days=2)
         self.assertIn("已过期", manager.native_write_gate_error(account))

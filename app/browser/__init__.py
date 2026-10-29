@@ -4,7 +4,8 @@ from .manager import BrowserManager, cookie_string_to_state
 from .login import (interactive_login, interactive_creator_login,
                     interactive_xhs_login, interactive_xhs_creator_login,
                     interactive_ks_login, interactive_ks_creator_login,
-                    interactive_channels_login, interactive_channels_creator_login)
+                    interactive_channels_login, interactive_channels_creator_login,
+                    interactive_tiktok_login)
 from .fetcher import (fetch_videos, fetch_douyin_search,
                       fetch_comments, fetch_creator_comments,
                       fetch_danmaku, fetch_creator_danmaku,
@@ -28,6 +29,7 @@ __all__ = ["BrowserManager", "cookie_string_to_state",
            "interactive_xhs_login", "interactive_xhs_creator_login",
            "interactive_ks_login", "interactive_ks_creator_login",
            "interactive_channels_login", "interactive_channels_creator_login",
+           "interactive_tiktok_login",
            "fetch_videos", "fetch_douyin_search", "fetch_comments", "fetch_creator_comments",
            "fetch_danmaku", "fetch_creator_danmaku",
            "fetch_self_profile", "post_comment_browser",

@@ -23,7 +23,7 @@ class TaskSubmission(SQLModel, table=True):
 class DouyinAccount(SQLModel, table=True):
     """登录得到的平台账号(浏览器会话持有者)。表名沿用历史,实际承载多平台账号。"""
     id: Optional[int] = Field(default=None, primary_key=True)
-    platform: str = Field(default="douyin", index=True)  # douyin | xhs | kuaishou | shipinhao
+    platform: str = Field(default="douyin", index=True)  # douyin | xhs | kuaishou | shipinhao | tiktok
     nickname: str = ""
     sec_uid: str = ""              # 抖音 sec_uid / 小红书 user_id
     uid: str = ""                  # 抖音数字 uid(= IM device_id,用于 frontier-im WS 接收)
@@ -71,7 +71,7 @@ class DouyinAccount(SQLModel, table=True):
     fp_extra_args: str = ""               # validated additional Chromium args
     geo_lat: float = 0.0          # geolocation 伪造纬度(代理体检时按出口 IP 归属地写入;0=按种子派生兜底)
     geo_lon: float = 0.0          # geolocation 伪造经度
-    proxy_status: str = "unknown"  # unknown | ok | bad
+    proxy_status: str = "unknown"  # unknown | bound | ok | rotating | bad | auth_error | blocked
     # 由账号的真实浏览器 context 探测并持久化；后续写操作用它识别出口漂移。
     exit_ip: str = ""
     exit_country: str = ""
@@ -403,6 +403,7 @@ class KeywordCollectionContent(SQLModel, table=True):
     desc: str = ""
     author_name: str = ""
     author_id: str = ""
+    source_url: str = ""                      # 作品规范链接；TikTok 必须保存真实作者路径
     media_type: str = "video"
     create_time: int = 0
     cover_url: str = ""
@@ -657,6 +658,7 @@ class CommentTask(SQLModel, table=True):
     rule_id: Optional[int] = Field(default=None, index=True)   # 来源规则(手动=None)
     account_id: Optional[int] = None
     aweme_id: str = Field(default="", index=True)         # 目标作品 / 笔记 note_id
+    target_url: str = ""                                  # TikTok 等需要作者路径的平台规范链接
     xsec_token: str = ""                                  # 小红书:发评论所需令牌
     target_comment_id: str = ""                           # 非空=回复该条评论;空=作品下顶层评论
     target_nick: str = ""                                 # 被回复者昵称(供 {nick} 用)

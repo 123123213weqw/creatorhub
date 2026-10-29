@@ -30,6 +30,15 @@ from ..browser import (BrowserManager, fetch_videos, fetch_comments,
                        fetch_account_works, fetch_douyin_account_works_api,
                        do_follow, send_dm, send_dm_api,
                        douyin_secure_post_api)
+from ..browser.tiktok_actions import (
+    do_tiktok_follow,
+    post_tiktok_comment,
+    send_tiktok_dm,
+)
+from ..browser.tiktok_fetcher import (
+    fetch_tiktok_comments,
+    fetch_tiktok_self_profile,
+)
 from . import compose
 from ..config import Config
 from ..account_lifecycle import AccountUnavailableError
@@ -51,6 +60,7 @@ from ..platforms.kuaishou import (parse_ks_feed, parse_ks_comment,
 from ..platforms.channels import (parse_channels_feed, parse_channels_comment,
                    flatten_channels_comments, parse_self_user as parse_channels_self_user,
                    publish_channels)
+from ..platforms.tiktok import parse_tiktok_comment
 from ..models import (ContentRecord, CommentRecord, CommentRule, CommentTask,
                       CommentWatch, DanmakuWatch, DanmakuRecord,
                        DouyinAccount, MonitorTarget, AccountRiskState,
@@ -550,7 +560,7 @@ class MonitorEngine:
     def _proxy_bad(acc) -> bool:
         return bool(
             acc and acc.proxy
-            and acc.proxy_status in {"bad", "auth_error", "blocked", "drifted"}
+            and acc.proxy_status in {"bad", "auth_error", "blocked"}
         )
 
     def _native_write_environment_error(
@@ -1264,6 +1274,12 @@ class MonitorEngine:
                     u, err = await fetch_ks_self_profile(self.browser, identity)
                 elif platform == "shipinhao":
                     u, err = await fetch_channels_self_profile(self.browser, identity)
+                elif platform == "tiktok":
+                    # TikTok must be checked against its own authenticated home
+                    # hydration. Falling through to Douyin's /user/self probe
+                    # falsely marks a valid TikTok profile as logged out.
+                    u, err = await fetch_tiktok_self_profile(
+                        self.browser, identity, block_media=True)
                 else:
                     u, err = await fetch_self_profile(self.browser, identity)
                 if u:
@@ -1288,6 +1304,16 @@ class MonitorEngine:
                     parsed = parse_ks_self_user(u)
                 elif platform == "shipinhao":
                     parsed = parse_channels_self_user(u)
+                elif platform == "tiktok":
+                    parsed = {
+                        "nickname": u.get("nickname") or "",
+                        "sec_uid": u.get("sec_uid") or "",
+                        "douyin_id": u.get("unique_id") or "",
+                        "avatar": u.get("avatar") or "",
+                        "follower_count": int(u.get("follower_count") or 0),
+                        "following_count": int(u.get("following_count") or 0),
+                        "aweme_count": int(u.get("video_count") or 0),
+                    }
                 else:
                     parsed = parse_self_user(u)
                 account.status = "active"
@@ -1297,7 +1323,7 @@ class MonitorEngine:
                 account.sec_uid = parsed.get("sec_uid") or account.sec_uid
                 account.douyin_id = parsed.get("douyin_id") or account.douyin_id
                 account.avatar = parsed.get("avatar") or account.avatar
-                if platform == "kuaishou":
+                if platform in {"kuaishou", "tiktok"}:
                     account.follower_count = int(parsed.get("follower_count") or 0)
                     account.following_count = int(parsed.get("following_count") or 0)
                     account.aweme_count = int(parsed.get("aweme_count") or 0)
@@ -2640,6 +2666,7 @@ class MonitorEngine:
             state = acc.storage_state or acc.creator_storage_state or ""
             ua = acc.ua or self.cfg.engine.user_agent
             proxy = acc.proxy or ""
+            tiktok_author_unique_id = (acc.douyin_id or "") if platform == "tiktok" else ""
             dy_transport = (resolve_transport(
                 self.cfg, "douyin", "own_work_comments", acc)
                 if platform == "douyin" else None)
@@ -2729,6 +2756,18 @@ class MonitorEngine:
                 error = err or ""
                 fresh = [c for c in (parse_channels_comment(rc)
                                      for rc in flatten_channels_comments(raw))
+                         if c and c["comment_id"] not in known]
+            elif platform == "tiktok":
+                source = configured_mode = "browser"
+                raw, err = await fetch_tiktok_comments(
+                    self.browser, identity, item_id, known,
+                    max_comments=300,
+                    max_scrolls=self.cfg.engine.comment_max_scrolls,
+                    include_replies=True,
+                    block_media=self.cfg.engine.block_media_resources,
+                    author_unique_id=tiktok_author_unique_id)
+                error = err or ""
+                fresh = [c for c in (parse_tiktok_comment(rc) for rc in raw)
                          if c and c["comment_id"] not in known]
             else:
                 return {"ok": False, "fetched": 0, "added": 0,
@@ -4348,12 +4387,25 @@ class MonitorEngine:
         async def _browser_action() -> tuple[bool, str, str]:
             """Original page route; kept as the only hybrid fallback."""
             if action == "follow":
-                ok, err = await do_follow(self.browser, identity, platform,
-                                          target_uid, target_sec_uid)
+                if platform == "tiktok":
+                    ok, err = await do_tiktok_follow(
+                        self.browser, identity, target_sec_uid or target_uid,
+                        on_submit=lambda: self._mark_write_submit(
+                            AccountActionTask, task_id))
+                else:
+                    ok, err = await do_follow(self.browser, identity, platform,
+                                              target_uid, target_sec_uid)
                 return ok, err, "browser"
             if action == "unfollow":
-                ok, err = await do_follow(self.browser, identity, platform,
-                                          target_uid, target_sec_uid, unfollow=True)
+                if platform == "tiktok":
+                    ok, err = await do_tiktok_follow(
+                        self.browser, identity, target_sec_uid or target_uid,
+                        unfollow=True,
+                        on_submit=lambda: self._mark_write_submit(
+                            AccountActionTask, task_id))
+                else:
+                    ok, err = await do_follow(self.browser, identity, platform,
+                                              target_uid, target_sec_uid, unfollow=True)
                 return ok, err, "browser"
             if action == "send_dm":
                 # Preserve the pre-existing browser-context imapi route when
@@ -4368,7 +4420,12 @@ class MonitorEngine:
                     category, _signal = classify_platform_error(err)
                     if category != RiskCategory.BUSINESS:
                         return False, err, "api_browser_context"
-                if platform == "xhs":
+                if platform == "tiktok":
+                    ok, err = await send_tiktok_dm(
+                        self.browser, identity, target_sec_uid or target_uid, content,
+                        on_submit=lambda: self._mark_write_submit(
+                            AccountActionTask, task_id))
+                elif platform == "xhs":
                     ok, err = await send_dm(
                         self.browser, identity, platform,
                         target_uid, target_sec_uid, content,
@@ -4708,6 +4765,7 @@ class MonitorEngine:
                 return {"ok": False, "error": "已达每日上限"}
             platform = t.platform
             aweme_id, xsec_token = t.aweme_id, t.xsec_token
+            target_url = getattr(t, "target_url", "") or ""
             target_cid, target_nick = t.target_comment_id, t.target_nick
             target_text = getattr(t, "target_text", "") or ""
             content = t.content
@@ -4803,6 +4861,14 @@ class MonitorEngine:
                     headed=(True if native_mode
                             else self.cfg.engine.comment_browser_headed))
                 result = "ok" if ok else ""
+            elif platform == "tiktok":
+                method = "browser"
+                ok, result, err = await post_tiktok_comment(
+                    self.browser, identity, aweme_id, content,
+                    reply_to_text=target_text if target_cid else "",
+                    require_reply=bool(target_cid),
+                    on_submit=lambda: self._mark_write_submit(CommentTask, task_id),
+                    headed=True, target_url=target_url)
             elif platform == "douyin" and dy_write_mode in {"api", "hybrid"}:
                 method = "api"
                 cookie = dy_cookie_from_state(state)

@@ -61,6 +61,8 @@ class EngineConfig:
     # 小红书读取默认使用常驻签名客户端直连；browser 保留为页面兼容模式。
     xhs_read_mode: str = "api"               # api | browser
     douyin_read_mode: str = "hybrid"         # 默认 API 优先/浏览器回退；api=仅 API；browser=仅浏览器
+    # native=纯 Python 离线签名直连；browser=已授权页面；auto=直连优先/页面回退。
+    tiktok_read_mode: str = "native"          # native | auto | browser
     # 本账号管理中的独立读取通道。资料与粉丝已支持直连；其余三项保留
     # 独立开关，待协议完整可验证后无需再迁移配置。
     douyin_profile_mode: str = "hybrid"      # hybrid | api | browser
@@ -120,7 +122,7 @@ class EngineConfig:
     native_write_proxy_max_age_seconds: int = 86400
     browser_exit_probe_url: str = "https://ipinfo.io/json"
     # ── 本账号作品健康监控(B5:盯自己作品的流量/0播/违规,发现异常推送通知)──
-    #   借鉴竞品「流速监控 / 持续0播 / 作品违规监控」。默认关闭(需 periodic 同步本账号作品,较重)。
+    # 默认关闭；启用后需定期同步本账号作品，资源开销较高。
     work_health_enabled: bool = False         # 作品健康监控总开关
     work_health_interval_seconds: int = 3600  # 每个账号多久体检一次自己作品
     work_health_zero_play_hours: float = 6.0  # 作品发布满 N 小时仍 0 播 -> 预警(限流信号)
@@ -204,6 +206,12 @@ def load_config(path: str | None = None) -> Config:
         cfg.engine.xhs_read_mode = (
             xhs_read_mode if xhs_read_mode in {"browser", "api"}
             else "api")
+        tiktok_read_mode = str(
+            cfg.engine.tiktok_read_mode or "native").strip().lower()
+        cfg.engine.tiktok_read_mode = (
+            tiktok_read_mode
+            if tiktok_read_mode in {"auto", "native", "browser"}
+            else "native")
         for name, default in (
                 ("douyin_read_mode", "hybrid"),
                 ("douyin_profile_mode", "hybrid"),

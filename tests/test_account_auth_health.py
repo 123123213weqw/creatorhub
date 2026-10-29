@@ -152,6 +152,48 @@ def test_periodic_interval_and_disable_switch_are_preserved(health):
     health.engine._probe_account_health.assert_awaited_once()
 
 
+def test_tiktok_health_uses_tiktok_profile_and_never_douyin(local_project, monkeypatch):
+    cfg = local_project.cfg
+    cfg.engine.verify_proxy_region = False
+    cfg.engine.work_health_stat_snapshots = False
+    cfg.risk_control.enabled = False
+    monkeypatch.setattr(local_project.browser, "identity_for", lambda a: Identity.from_account(
+        a, cfg.engine.profiles_dir, cfg.engine.user_agent), raising=False)
+    account_id = store(DouyinAccount(
+        platform="tiktok", nickname="old", status="active",
+        storage_state='{"cookies": []}', douyin_id="old-id",
+    ))
+    engine = MonitorEngine(cfg, local_project.browser)
+    tiktok_profile = AsyncMock(return_value=({
+        "uid": "1", "sec_uid": "sec", "unique_id": "alice",
+        "nickname": "Alice", "avatar": "https://img/avatar.jpg",
+        "follower_count": 7, "following_count": 4, "video_count": 2,
+    }, ""))
+    douyin_profile = AsyncMock(
+        side_effect=AssertionError("TikTok health must not use Douyin self profile"))
+    monkeypatch.setattr(monitor, "fetch_tiktok_self_profile", tiktok_profile)
+    monkeypatch.setattr(monitor, "fetch_self_profile", douyin_profile)
+
+    with db.get_session() as session:
+        account = session.get(DouyinAccount, account_id)
+        value = engine._account_probe_tuple(account)
+    result = asyncio.run(engine._probe_account_health(value))
+
+    assert result["ok"] is True
+    tiktok_profile.assert_awaited_once_with(
+        local_project.browser, value[-1], block_media=True)
+    douyin_profile.assert_not_awaited()
+    with db.get_session() as session:
+        account = session.get(DouyinAccount, account_id)
+        assert account.status == "active"
+        assert account.nickname == "Alice"
+        assert account.sec_uid == "sec"
+        assert account.douyin_id == "alice"
+        assert account.follower_count == 7
+        assert account.following_count == 4
+        assert account.aweme_count == 2
+
+
 @pytest.mark.parametrize("mode", ["api", "hybrid"])
 def test_manual_refresh_cannot_restore_expired_login_from_public_profile(health, monkeypatch, mode):
     health.cfg.engine.douyin_profile_mode = mode

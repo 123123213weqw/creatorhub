@@ -31,6 +31,8 @@ class Aweme:
     duration: int = 0           # 秒
     avatar: str = ""            # 作者头像
     platform: str = "douyin"    # douyin | xhs(决定下载时的 Referer)
+    source_url: str = ""        # 平台作品规范链接（可用时持久化，避免后续猜链接）
+    author_unique_id: str = ""  # TikTok 等平台构造规范作品链接所需的公开账号名
 
 
 def _first_http(urls) -> Optional[str]:
