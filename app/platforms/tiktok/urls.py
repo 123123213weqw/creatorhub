@@ -33,7 +33,9 @@ class TikTokVideoRef:
 
 
 _VIDEO_PATH_RE = re.compile(r"/@([^/?#]+)/video/(\d+)", re.I)
+_PROFILE_PATH_RE = re.compile(r"/@([^/?#]+)", re.I)
 _VIDEO_ID_RE = re.compile(r"^\d{1,30}$")
+_UNIQUE_ID_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
 _URL_RE = re.compile(r"https?://[^\s<>\"']+", re.I)
 
 
@@ -65,6 +67,26 @@ def parse_video_reference(value: str, author_unique_id: str = "") -> TikTokVideo
     if _VIDEO_ID_RE.fullmatch(text) and author:
         return TikTokVideoRef(text, author, video_url(text, author))
     return None
+
+
+def parse_profile_reference(value: str) -> str:
+    """Return a TikTok unique_id from a profile/video URL or @name."""
+    text = str(value or "").strip()
+    candidates = _URL_RE.findall(text) or ([text] if text.startswith("http") else [])
+    for candidate in candidates:
+        try:
+            path = unquote(urlsplit(candidate.rstrip(".,，。)）]】")).path)
+        except ValueError:
+            continue
+        matched = _PROFILE_PATH_RE.search(path)
+        if matched:
+            unique_id = unquote(matched.group(1)).strip().lstrip("@")
+            if _UNIQUE_ID_RE.fullmatch(unique_id):
+                return unique_id
+    direct = text.lstrip("@")
+    if _UNIQUE_ID_RE.fullmatch(direct) and not direct.isdigit():
+        return direct
+    return ""
 
 
 def profile_url(unique_id: str) -> str:

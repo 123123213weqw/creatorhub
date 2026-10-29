@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from typing import Optional
 
 from ..douyin.extract import Aweme, MediaItem
@@ -52,10 +53,20 @@ def parse_tiktok_aweme(raw: dict, quality: str = "highest") -> Optional[Aweme]:
     author_unique_id = str(_first(author, "uniqueId", "unique_id", default="") or "")
     stats = item.get("stats") or item.get("statistics") or {}
     video = item.get("video") or {}
+    create_time = _int(_first(item, "createTime", "create_time", default=0))
+    if create_time > 10_000_000_000:
+        create_time //= 1000
+    if not create_time and aweme_id.isdigit():
+        # TikTok 64 位作品 ID 的高 32 位通常是 Unix 秒时间戳。主页 DOM
+        # 卡片经常省略 createTime，用该稳定字段补全，避免首扫建立基线后
+        # 下一轮把全部旧作品误判成新增。
+        candidate = int(aweme_id) >> 32
+        if 1_450_000_000 <= candidate <= int(time.time()) + 86400:
+            create_time = candidate
     aweme = Aweme(
         aweme_id=aweme_id,
         desc=str(_first(item, "desc", "description", default="") or "").strip(),
-        create_time=_int(_first(item, "createTime", "create_time", default=0)),
+        create_time=create_time,
         author_name=str(_first(author, "nickname", "uniqueId", "unique_id", default="") or ""),
         media_type="video",
     )

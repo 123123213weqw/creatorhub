@@ -92,7 +92,7 @@ from .platforms.tiktok import (
     native_protocol_summary,
     parse_tiktok_app_context,
 )
-from .platforms.tiktok.urls import parse_video_reference
+from .platforms.tiktok.urls import parse_profile_reference, parse_video_reference
 from .engine import Downloader, MonitorEngine
 from .engine.share_downloader import (
     clean_platform_share_target,
@@ -7839,9 +7839,11 @@ def _clean_platform_target_input(value: str, platform: str) -> str:
             item.platform == platform for item in detected_links):
         platform_name = {
             "douyin": "抖音", "xhs": "小红书", "kuaishou": "快手",
+            "tiktok": "TikTok",
         }.get(platform, platform)
         detected_names = {
             "douyin": "抖音", "xhs": "小红书", "kuaishou": "快手",
+            "tiktok": "TikTok",
             "generic": "其他站点",
         }
         names = "、".join(dict.fromkeys(
@@ -7854,6 +7856,25 @@ def _clean_platform_target_input(value: str, platform: str) -> str:
             f"请粘贴{platform_name}链接或完整分享文案",
         )
     return target_input
+
+
+async def _resolve_tiktok_target(value: str) -> tuple[str, object | None, str]:
+    """Resolve TikTok short links and return input, video ref and profile ID."""
+    target = str(value or "").strip()
+    video_ref = parse_video_reference(target)
+    unique_id = parse_profile_reference(target)
+    if video_ref or unique_id or "://" not in target:
+        return target, video_ref, unique_id
+    try:
+        import httpx
+        async with httpx.AsyncClient(
+                follow_redirects=True, timeout=15,
+                headers={"User-Agent": cfg.engine.user_agent}) as client:
+            async with client.stream("GET", target) as response:
+                target = str(response.url)
+    except Exception:
+        pass
+    return target, parse_video_reference(target), parse_profile_reference(target)
 
 
 def _ensure_creator_monitor_available(session, *, platform: str, sec_uid: str,
@@ -7877,7 +7898,7 @@ def _ensure_creator_monitor_available(session, *, platform: str, sec_uid: str,
 
 @app.post("/api/monitors")
 async def add_monitor(body: TargetIn):
-    platform = body.platform if body.platform in ("douyin", "xhs", "kuaishou") else "douyin"
+    platform = body.platform if body.platform in ("douyin", "xhs", "kuaishou", "tiktok") else "douyin"
     sec_uid = keyword = xsec_token = ""
     kind = "creator"
 
@@ -7898,6 +7919,11 @@ async def add_monitor(body: TargetIn):
         sec_uid = await resolve_ks_user_id(target_input, cfg.engine.user_agent)
         if not sec_uid:
             raise HTTPException(400, "无法解析快手 user_id,请粘贴完整分享文案、创作者主页链接 / v.kuaishou.com 短链 / user_id")
+    elif platform == "tiktok":
+        target_input, video_ref, profile_id = await _resolve_tiktok_target(target_input)
+        sec_uid = profile_id or (video_ref.author_unique_id if video_ref else "")
+        if not sec_uid:
+            raise HTTPException(400, "无法解析 TikTok @username，请粘贴完整主页/作品链接、短链或 @username")
     elif platform == "douyin":
         sec_uid = await resolve_sec_uid(target_input, cfg.engine.user_agent)
         if not sec_uid:
@@ -7921,14 +7947,19 @@ async def add_monitor(body: TargetIn):
         except Exception as e:
             raise HTTPException(400, f"下载目录不可用: {e}")
     with get_session() as s:
-        if platform == "douyin":
+        if platform in {"douyin", "tiktok"}:
+            platform_name = "TikTok" if platform == "tiktok" else "抖音"
             if not body.account_id:
                 raise HTTPException(
-                    400, "抖音作品监控必须选择已登录账号,匿名抓取可能返回陈旧或残缺作品")
+                    400, f"{platform_name}作品监控必须选择已登录账号")
             monitor_acc = s.get(DouyinAccount, body.account_id)
-            if (not monitor_acc or monitor_acc.platform != "douyin"
+            if (not monitor_acc or monitor_acc.platform != platform
                     or monitor_acc.status != "active"):
-                raise HTTPException(400, "所选抖音账号不存在或登录态已失效")
+                raise HTTPException(400, f"所选{platform_name}账号不存在或登录态已失效")
+            if (platform == "tiktok"
+                    and not (monitor_acc.storage_state
+                             or monitor_acc.creator_storage_state)):
+                raise HTTPException(400, "所选 TikTok 账号缺少登录会话，请重新登录")
         elif body.account_id:
             monitor_acc = s.get(DouyinAccount, body.account_id)
             if not monitor_acc or monitor_acc.platform != platform:
@@ -8036,6 +8067,9 @@ async def update_monitor(tid: int, body: TargetUpdate):
             acc = s.get(DouyinAccount, body.account_id)
             if not acc or acc.platform != t.platform or acc.status != "active":
                 raise HTTPException(400, "账号不存在、登录态失效或与监控平台不匹配")
+            if (t.platform == "tiktok"
+                    and not (acc.storage_state or acc.creator_storage_state)):
+                raise HTTPException(400, "所选 TikTok 账号缺少登录会话，请重新登录")
             if t.target_kind != "keyword":
                 _ensure_creator_monitor_available(
                     s, platform=t.platform, sec_uid=t.sec_uid,
@@ -9142,7 +9176,7 @@ async def list_watches(platform: str | None = None):
 
 @app.post("/api/comment-watches")
 async def add_watch(body: WatchIn):
-    platform = body.platform if body.platform in ("douyin", "xhs", "kuaishou") else "douyin"
+    platform = body.platform if body.platform in ("douyin", "xhs", "kuaishou", "tiktok") else "douyin"
     aweme_id = sec_uid = xsec_token = ""
     title = ""
     target_input = _clean_platform_target_input(body.url_or_id, platform)
@@ -9196,6 +9230,22 @@ async def add_watch(body: WatchIn):
             if not sec_uid:
                 raise HTTPException(400, "无法解析快手 user_id,请粘贴完整分享文案、主页链接 / 短链 / user_id")
         mode = "public"
+    elif platform == "tiktok":
+        target_input, video_ref, profile_id = await _resolve_tiktok_target(target_input)
+        kind = body.kind if body.kind in {"auto", "video", "user"} else "auto"
+        if kind == "auto":
+            kind = "video" if video_ref else "user"
+        if kind == "video":
+            if not video_ref:
+                raise HTTPException(400, "无法解析 TikTok 作品，请粘贴包含作者 @username 的完整作品链接或短链")
+            aweme_id = video_ref.aweme_id
+            sec_uid = video_ref.author_unique_id
+            title = f"@{sec_uid} 视频 {aweme_id}"
+        else:
+            sec_uid = profile_id or (video_ref.author_unique_id if video_ref else "")
+            if not sec_uid:
+                raise HTTPException(400, "无法解析 TikTok @username，请粘贴完整主页/作品链接、短链或 @username")
+        mode = "public"
     else:
         kind = body.kind
         if kind == "auto":
@@ -9222,6 +9272,12 @@ async def add_watch(body: WatchIn):
                 raise HTTPException(400, "创作中心模式需要选择一个已“创作者登录”的账号")
 
     with get_session() as s:
+        if platform == "tiktok":
+            account = s.get(DouyinAccount, body.account_id) if body.account_id else None
+            if not account or account.platform != "tiktok" or account.status != "active":
+                raise HTTPException(400, "TikTok 评论监控必须选择一个登录有效的 TikTok 账号")
+            if not (account.storage_state or account.creator_storage_state):
+                raise HTTPException(400, "所选 TikTok 账号缺少登录会话，请重新登录")
         if kind == "video":
             dup = s.exec(select(CommentWatch).where(CommentWatch.platform == platform)
                          .where(CommentWatch.aweme_id == aweme_id)).first()
@@ -9276,6 +9332,9 @@ async def update_watch(wid: int, body: WatchUpdate):
             acc = s.get(DouyinAccount, body.account_id)
             if not acc or acc.platform != w.platform or acc.status != "active":
                 raise HTTPException(400, "账号不存在、登录态失效或与评论监控平台不匹配")
+            if (w.platform == "tiktok"
+                    and not (acc.storage_state or acc.creator_storage_state)):
+                raise HTTPException(400, "所选 TikTok 账号缺少登录会话，请重新登录")
             w.account_id = body.account_id
         if new_mode == "creator":
             if w.platform != "douyin" or w.kind != "user":

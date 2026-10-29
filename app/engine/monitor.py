@@ -37,6 +37,7 @@ from ..browser.tiktok_actions import (
 )
 from ..browser.tiktok_fetcher import (
     fetch_tiktok_comments,
+    fetch_tiktok_profile_works,
     fetch_tiktok_self_profile,
 )
 from . import compose
@@ -60,7 +61,10 @@ from ..platforms.kuaishou import (parse_ks_feed, parse_ks_comment,
 from ..platforms.channels import (parse_channels_feed, parse_channels_comment,
                    flatten_channels_comments, parse_self_user as parse_channels_self_user,
                    publish_channels)
-from ..platforms.tiktok import parse_tiktok_comment
+from ..platforms.tiktok import (TikTokNativeClient, parse_tiktok_aweme,
+                                parse_tiktok_comment)
+from ..platforms.tiktok.urls import profile_url as tiktok_profile_url
+from ..platforms.tiktok.urls import video_url as tiktok_video_url
 from ..models import (ContentRecord, CommentRecord, CommentRule, CommentTask,
                       CommentWatch, DanmakuWatch, DanmakuRecord,
                        DouyinAccount, MonitorTarget, AccountRiskState,
@@ -225,6 +229,43 @@ def _select_douyin_awemes(items: list, quality: str, first_scan: bool,
     historical = [aw for aw in parsed
                   if aw.create_time and aw.create_time < monitor_since]
     return current + historical[:max(0, initial_backfill_count)]
+
+
+def _select_tiktok_awemes(items: list, quality: str, first_scan: bool,
+                          monitor_since: int, initial_backfill_count: int) -> list[Aweme]:
+    parsed = []
+    seen = set()
+    for item in items:
+        aw = parse_tiktok_aweme(item, quality)
+        if not aw or aw.aweme_id in seen:
+            continue
+        seen.add(aw.aweme_id)
+        parsed.append(aw)
+    parsed.sort(key=lambda aw: (aw.create_time, aw.aweme_id), reverse=True)
+    if not first_scan:
+        return [aw for aw in parsed
+                if not aw.create_time or aw.create_time >= monitor_since]
+    if initial_backfill_count < 0:
+        return parsed
+    current = [aw for aw in parsed
+               if aw.create_time and aw.create_time >= monitor_since]
+    historical = [aw for aw in parsed
+                  if aw.create_time and aw.create_time < monitor_since]
+    return current + historical[:max(0, initial_backfill_count)]
+
+
+def _tiktok_download_session(account, identity, default_user_agent: str) \
+        -> tuple[str, dict[str, str]]:
+    user_agent = str(
+        getattr(identity, "ua", "") or getattr(account, "ua", "")
+        or default_user_agent or "")
+    cookies: dict[str, str] = {}
+    for field in ("storage_state", "creator_storage_state"):
+        state = getattr(account, field, "") or ""
+        if state:
+            cookies.update(TikTokNativeClient(
+                storage_state=state, user_agent=user_agent).cookies)
+    return user_agent, cookies
 
 
 def _douyin_scan_since(monitor_since: int, known_create_times: list[int]) -> int:
@@ -1626,6 +1667,8 @@ class MonitorEngine:
             return await self._scan_xhs_target_locked(target_id)
         if platform == "kuaishou":
             return await self._scan_ks_target_locked(target_id)
+        if platform == "tiktok":
+            return await self._scan_tiktok_target_locked(target_id)
         with get_session() as s:
             target = s.get(MonitorTarget, target_id)
             if not target:
@@ -1811,6 +1854,107 @@ class MonitorEngine:
                                if should_download))
         return {"ok": not error, "new": len(new_records), "error": error,
                 "scanned": len(seen), "filtered": filtered_count}
+
+    async def _scan_tiktok_target_locked(self, target_id: int) -> dict:
+        with get_session() as s:
+            target = s.get(MonitorTarget, target_id)
+            if not target:
+                return {"ok": False, "error": "target not found"}
+            first_scan = target.last_scan_at is None
+            if not target.account_id:
+                return self._mark_target_skip(
+                    target_id, "TikTok 作品监控必须绑定已登录账号")
+            acc = s.get(DouyinAccount, target.account_id)
+            if not acc or acc.platform != "tiktok" or acc.status != "active":
+                return self._mark_target_skip(
+                    target_id, "绑定的 TikTok 账号不存在或登录态已失效")
+            if not (acc.storage_state or acc.creator_storage_state):
+                return self._mark_target_skip(
+                    target_id, "绑定的 TikTok 账号缺少登录会话，请重新登录")
+            if self._proxy_bad(acc):
+                return self._mark_target_skip(
+                    target_id, "账号代理标记为不可用(proxy bad),已跳过以免暴露真实 IP")
+            identity, proxy = self._identity_proxy(acc)
+            known = set(s.exec(select(ContentRecord.aweme_id).where(
+                ContentRecord.target_id == target_id)).all())
+            known_create_times = list(s.exec(select(ContentRecord.create_time).where(
+                ContentRecord.target_id == target_id)).all())
+            unique_id = target.sec_uid
+            base_dir = target.download_dir or get_setting(
+                "download_dir", self.cfg.engine.media_dir)
+            quality = target.video_quality or get_setting("video_quality", "highest")
+            monitor_since = int(target.created_at.timestamp())
+            scan_since = _douyin_scan_since(monitor_since, known_create_times)
+            backfill_count = target.initial_backfill_count
+            auto_download = target.download_enabled
+            media_filter = target.media_filter or "all"
+            strategy = _monitor_strategy(target, default_scrolls=12, default_items=0)
+            download_ua, download_cookies = _tiktok_download_session(
+                acc, identity, self.cfg.engine.user_agent)
+
+        items, error = await fetch_tiktok_profile_works(
+            self.browser, identity, unique_id,
+            max_results=max(100, strategy["max_items"] or 0),
+            max_scrolls=strategy["max_scrolls"],
+            block_media=self.cfg.engine.block_media_resources)
+        selected = _select_tiktok_awemes(
+            items, quality, first_scan, scan_since, backfill_count)
+        new_records = []
+        filtered_count = 0
+        for aw in selected:
+            if aw.aweme_id in known:
+                continue
+            if not _monitor_content_matches(aw, strategy):
+                filtered_count += 1
+                continue
+            if strategy["max_items"] and len(new_records) >= strategy["max_items"]:
+                break
+            wants_download = auto_download and (
+                media_filter == "all" or aw.media_type == media_filter)
+            should_download = wants_download and bool(aw.medias)
+            media_json = json.dumps([{"url": m.url, "kind": m.kind,
+                                      "ext": m.ext, "index": m.index}
+                                     for m in aw.medias])
+            rec = ContentRecord(
+                platform="tiktok", target_id=target_id, aweme_id=aw.aweme_id,
+                desc=aw.desc, media_type=aw.media_type, quality=aw.quality_label,
+                create_time=aw.create_time, cover_url=aw.cover or "",
+                like_count=aw.like_count, comment_count=aw.comment_count,
+                duration=aw.duration, media_json=media_json,
+                download_status=("pending" if should_download else
+                                 "failed" if wants_download else "skipped"),
+                error=("" if aw.medias or not wants_download
+                       else "TikTok 主页数据未返回媒体直链"),
+            )
+            new_records.append((rec, aw, should_download))
+
+        target_name = ""
+        with get_session() as s:
+            for rec, _, _ in new_records:
+                s.add(rec)
+            target = s.get(MonitorTarget, target_id)
+            if target:
+                target.last_scan_at = datetime.utcnow()
+                target.last_error = error or ""
+                first_aweme = next((aw for _, aw, _ in new_records), None)
+                if first_aweme:
+                    target.nickname = target.nickname or first_aweme.author_name
+                    target.avatar = target.avatar or first_aweme.avatar
+                s.add(target)
+                target_name = target.nickname or (unique_id or "tiktok")
+            s.commit()
+            for rec, _, _ in new_records:
+                s.refresh(rec)
+
+        if new_records and not first_scan:
+            await self._notify_new(target_name, [aw for _, aw, _ in new_records])
+        await asyncio.gather(*(self._download(
+            rec.id, aw, base_dir, proxy, user_agent=download_ua,
+            cookies=download_cookies,
+            referer=aw.source_url or tiktok_profile_url(unique_id))
+            for rec, aw, should_download in new_records if should_download))
+        return {"ok": not error, "new": len(new_records), "error": error,
+                "scanned": len(selected), "filtered": filtered_count}
 
     def _mark_target_skip(self, target_id: int, msg: str) -> dict:
         """把跳过原因写到目标 last_error,并推进 last_scan_at(避免下轮立刻重试)。"""
@@ -2898,6 +3042,21 @@ class MonitorEngine:
             if w.account_id:
                 acc = s.get(DouyinAccount, w.account_id)
                 if acc:
+                    if platform == "tiktok" and (
+                            acc.platform != "tiktok" or acc.status != "active"):
+                        msg = "绑定的 TikTok 账号不存在或登录态已失效"
+                        w.last_scan_at = datetime.utcnow()
+                        w.last_error = msg
+                        s.add(w); s.commit()
+                        return {"ok": False, "new_comments": 0, "error": msg}
+                    if (platform == "tiktok"
+                            and not (acc.storage_state
+                                     or acc.creator_storage_state)):
+                        msg = "绑定的 TikTok 账号缺少登录会话，请重新登录"
+                        w.last_scan_at = datetime.utcnow()
+                        w.last_error = msg
+                        s.add(w); s.commit()
+                        return {"ok": False, "new_comments": 0, "error": msg}
                     if self._proxy_bad(acc):
                         msg = "账号代理标记为不可用(proxy bad),已跳过以免暴露真实 IP"
                         w2 = s.get(CommentWatch, watch_id)
@@ -2912,6 +3071,18 @@ class MonitorEngine:
                     proxy = acc.proxy or ""
                     has_creator = bool(creator_state)
                     identity = self.browser.identity_for(acc)
+                elif platform == "tiktok":
+                    msg = "绑定的 TikTok 账号不存在或登录态已失效"
+                    w.last_scan_at = datetime.utcnow()
+                    w.last_error = msg
+                    s.add(w); s.commit()
+                    return {"ok": False, "new_comments": 0, "error": msg}
+            if platform == "tiktok" and not w.account_id:
+                msg = "TikTok 评论监控必须绑定已登录账号"
+                w.last_scan_at = datetime.utcnow()
+                w.last_error = msg
+                s.add(w); s.commit()
+                return {"ok": False, "new_comments": 0, "error": msg}
 
         # 公开抖音读取可复用一个带 Cookie 的 Web API 会话；创作中心仍由
         # 浏览器处理。没有登录态时 hybrid 继续允许匿名浏览器回退。
@@ -2953,6 +3124,13 @@ class MonitorEngine:
             elif platform == "kuaishou":   # 单条作品
                 total_new, author = await self._cw_ks_video(watch_id, identity, aweme_id,
                                                             name, first_scan)
+            elif platform == "tiktok" and kind == "user":
+                total_new, author = await self._cw_tiktok_user(
+                    watch_id, identity, state, sec_uid, name, first_scan, proxy)
+            elif platform == "tiktok":
+                total_new, author = await self._cw_tiktok_video(
+                    watch_id, identity, state, aweme_id, sec_uid, name,
+                    first_scan, proxy)
             elif kind == "user" and mode == "creator":
                 total_new, author = await self._cw_creator(watch_id, identity, has_creator,
                                                            name, first_scan)
@@ -3162,6 +3340,80 @@ class MonitorEngine:
         return total, ({"nickname": author_dict["nickname"],
                         "avatar_thumb": {"url_list": [author_dict["avatar"]]}}
                        if author_dict else None)
+
+    async def _cw_tiktok_video(self, watch_id, identity, state, aweme_id,
+                               author_unique_id, name, first_scan, proxy,
+                               work_desc=""):
+        if not author_unique_id:
+            raise RuntimeError("TikTok 评论监控缺少作品作者 @username")
+        settings = self._comment_watch_settings(watch_id)
+        with get_session() as s:
+            known = set(s.exec(select(CommentRecord.comment_id).where(
+                CommentRecord.watch_id == watch_id,
+                CommentRecord.aweme_id == aweme_id)).all())
+        mode = str(getattr(self.cfg.engine, "tiktok_read_mode", "native") or "native")
+        raw: list = []
+        native_error = ""
+        target_url = tiktok_video_url(aweme_id, author_unique_id)
+        if mode in {"auto", "native"}:
+            client = TikTokNativeClient(
+                storage_state=state, user_agent=identity.ua, proxy=proxy,
+                locale=identity.locale, timezone=identity.timezone_id,
+                viewport=(identity.viewport_w, identity.viewport_h), region="US",
+                device_seed=identity.fp_seed or str(identity.account_id or "creatorhub"),
+                timeout=max(10, int(self.cfg.engine.request_timeout_seconds)))
+            native = await client.comments(
+                aweme_id, count=300, include_replies=True,
+                author_unique_id=author_unique_id, target_url=target_url)
+            if native.compatible:
+                raw = native.items
+                native_error = native.error or ""
+            elif mode == "native":
+                raise RuntimeError(native.error or "TikTok 离线评论接口不可用")
+            else:
+                native_error = native.error or native.category
+        if mode == "browser" or (mode == "auto" and not raw and native_error):
+            raw, browser_error = await fetch_tiktok_comments(
+                self.browser, identity, aweme_id, known, max_comments=300,
+                max_scrolls=settings["max_scrolls"], include_replies=True,
+                block_media=self.cfg.engine.block_media_resources,
+                author_unique_id=author_unique_id, target_url=target_url)
+            if browser_error and not raw:
+                raise RuntimeError(browser_error)
+        fresh = [c for c in (parse_tiktok_comment(item) for item in raw)
+                 if c and c["comment_id"] not in known]
+        count = await self._ingest(
+            watch_id, aweme_id, fresh, name, work_desc or name, first_scan,
+            platform="tiktok")
+        return count, None
+
+    async def _cw_tiktok_user(self, watch_id, identity, state, unique_id,
+                              name, first_scan, proxy):
+        settings = self._comment_watch_settings(watch_id)
+        items, error = await fetch_tiktok_profile_works(
+            self.browser, identity, unique_id, max_results=100, max_scrolls=4,
+            block_media=self.cfg.engine.block_media_resources)
+        if error and not items:
+            raise RuntimeError(error)
+        works = []
+        cutoff = int(time.time()) - settings["recent_days"] * 86400
+        for raw in items:
+            aw = parse_tiktok_aweme(raw)
+            if aw and (not aw.create_time or aw.create_time >= cutoff):
+                works.append(aw)
+        works.sort(key=lambda aw: (aw.create_time, aw.aweme_id), reverse=True)
+        works = works[:settings["recent_works"]]
+        total = 0
+        for aw in works:
+            count, _ = await self._cw_tiktok_video(
+                watch_id, identity, state, aw.aweme_id,
+                aw.author_unique_id or unique_id, name, first_scan, proxy, aw.desc)
+            total += count
+        first = works[0] if works else None
+        author = ({"nickname": first.author_name,
+                   "avatar_thumb": {"url_list": [first.avatar]}}
+                  if first else None)
+        return total, author
 
     async def _cw_creator(self, watch_id, identity, has_creator, name, first_scan):
         if not has_creator:
@@ -5039,7 +5291,8 @@ class MonitorEngine:
         except Exception as e:
             log.warning("通知发送失败: %s", e)
 
-    async def _download(self, record_id: int, aweme, base_dir: str = "", proxy: str = ""):
+    async def _download(self, record_id: int, aweme, base_dir: str = "", proxy: str = "",
+                        *, user_agent: str = "", cookies=None, referer: str = ""):
         async with self._sem:
             with get_session() as s:
                 rec = s.get(ContentRecord, record_id)
@@ -5047,7 +5300,8 @@ class MonitorEngine:
                     rec.download_status = "downloading"
                     s.add(rec); s.commit()
             ok, path, err = await self.downloader.download_aweme(
-                aweme, base_dir, self._dl_proxy(proxy))
+                aweme, base_dir, self._dl_proxy(proxy), user_agent=user_agent,
+                cookies=cookies, referer=referer)
             with get_session() as s:
                 rec = s.get(ContentRecord, record_id)
                 if rec:
@@ -5085,6 +5339,7 @@ class MonitorEngine:
             account_id = t.account_id if t else None
             acc_state = ""
             acc_proxy = ""
+            acc = None
             identity = None
             if t and t.account_id:
                 acc = s.get(DouyinAccount, t.account_id)
@@ -5096,6 +5351,9 @@ class MonitorEngine:
                         identity = identity_for(acc)
             media_json = rec.media_json
             aw = self._rebuild_aweme(rec, author_name)
+            if platform == "tiktok" and t and t.sec_uid:
+                aw.author_unique_id = t.sec_uid
+                aw.source_url = tiktok_video_url(aw.aweme_id, t.sec_uid)
             needs_xhs_refetch = platform == "xhs" and (
                 not media_json or not aw.medias)
             rec.download_status = "downloading"
@@ -5176,8 +5434,17 @@ class MonitorEngine:
                     s.add(rec); s.commit()
             return {"ok": False, "error": "无媒体直链快照"}
 
+        download_ua = ""
+        download_cookies = None
+        download_referer = ""
+        if platform == "tiktok" and acc is not None and identity is not None:
+            download_ua, download_cookies = _tiktok_download_session(
+                acc, identity, self.cfg.engine.user_agent)
+            download_referer = aw.source_url or tiktok_profile_url(
+                t.sec_uid if t else "")
         ok, path, err = await self.downloader.download_aweme(
-            aw, base_dir, self._dl_proxy(acc_proxy))
+            aw, base_dir, self._dl_proxy(acc_proxy), user_agent=download_ua,
+            cookies=download_cookies, referer=download_referer)
         with get_session() as s:
             rec = s.get(ContentRecord, record_id)
             if rec:

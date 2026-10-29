@@ -1208,6 +1208,7 @@ function applyPlatformUI() {
   if ($("w-url")) $("w-url").placeholder = PLATFORM === "xhs"
     ? "直接粘贴整段小红书分享文案，将自动提取笔记或主页链接"
     : PLATFORM === "kuaishou" ? "直接粘贴整段快手分享文案，将自动提取作品或主页链接"
+    : PLATFORM === "tiktok" ? "直接粘贴整段 TikTok 分享文案，将自动提取视频或主页链接"
     : "直接粘贴整段抖音分享文案，将自动提取视频或主页链接";
   resetWatchTargetState();
   const ckl = $("ck-label");
@@ -1229,7 +1230,7 @@ function applyPlatformUI() {
     // 视频号本账号只有「我的作品 / 数据」;若停在关注/粉丝/私信子页,切回我的作品
     if (["following", "fans", "dm"].includes(HUB_TAB)) switchHubTab("myworks");
   }
-  if (PLATFORM === "tiktok" && ["monitors", "comments", "autocomment"].includes(CURRENT_TAB)) switchTab("hub");
+  if (PLATFORM === "tiktok" && CURRENT_TAB === "autocomment") switchTab("hub");
   if (PLATFORM !== "tiktok" && CURRENT_TAB === "tiktok-tools") switchTab("accounts");
   if (PLATFORM === "tiktok" && ["following", "fans", "dm"].includes(HUB_TAB)) switchHubTab("myworks");
   if (!["douyin", "xhs", "kuaishou", "shipinhao", "tiktok"].includes(PLATFORM) && CURRENT_TAB === "collections") switchTab("overview");
@@ -1400,14 +1401,19 @@ function applyMonitorForm() {
   const title = $("mon-add-title");
   const lbl = $("t-url-label");
   const parseButton = document.querySelector('[data-panel="monitors"] .smart-target-action');
-  if (PLATFORM === "douyin" || PLATFORM === "kuaishou") {
+  if (PLATFORM === "douyin" || PLATFORM === "kuaishou" || PLATFORM === "tiktok") {
     const isKs = PLATFORM === "kuaishou";
+    const isTikTok = PLATFORM === "tiktok";
     if (title) title.innerHTML = (isKs ? '添加创作者监控' : '添加作品监控')
       + ' <span class="sub">监控并下载新作品</span>';
-    if (lbl) lbl.textContent = isKs
+    if (lbl) lbl.textContent = isTikTok
+      ? "创作者主页 / 完整分享文案 / @username"
+      : isKs
       ? "创作者主页 / 完整分享文案 / user_id"
       : "创作者主页 / 完整分享文案 / sec_uid";
-    $("t-url").placeholder = isKs
+    $("t-url").placeholder = isTikTok
+      ? "直接粘贴整段 TikTok 主页或作品分享文案，将自动提取 @username"
+      : isKs
       ? "直接粘贴整段快手主页分享文案，将自动提取有效链接"
       : "直接粘贴整段抖音主页分享文案，将自动提取有效链接";
     if (parseButton) parseButton.classList.remove("hidden");
@@ -3799,11 +3805,14 @@ function accOptions(list, ph) {
 }
 function populateAccountSelect() {
   const sel = $("t-acc"); if (!sel) return;
-  const required = PLATFORM === "xhs" || PLATFORM === "douyin";
-  const platformName = PLATFORM === "xhs" ? "小红书" : "抖音";
-  sel.innerHTML = accOptions(ACCOUNTS, required ? `请选择${platformName}账号(必选)` : "不指定账号");
+  const required = ["xhs", "douyin", "tiktok"].includes(PLATFORM);
+  const platformName = PF_NAME[PLATFORM] || "当前平台";
+  const list = PLATFORM === "tiktok"
+    ? ACCOUNTS.filter(a => a.status === "active" && a.has_storage)
+    : ACCOUNTS;
+  sel.innerHTML = accOptions(list, required ? `请选择${platformName}账号(必选)` : "不指定账号");
   // 抖音匿名主页可能返回风控后的旧快照；作品监控与小红书一样必须使用登录态。
-  if (required && ACCOUNTS.length) sel.value = String(ACCOUNTS[0].id);
+  if (required && list.length) sel.value = String(list[0].id);
 }
 function populateCollectionAccount() {
   const sel = $("col-account"); if (!sel) return;
@@ -3818,12 +3827,16 @@ function populateCollectionAccount() {
 function populateWatchAccount() {
   const sel = $("w-acc"); if (!sel) return;
   const xhs = PLATFORM === "xhs";
-  const creatorOnly = !xhs && $("w-mode") && $("w-mode").value === "creator";
-  const list = creatorOnly ? ACCOUNTS.filter(a => a.has_creator) : ACCOUNTS;
-  const ph = xhs ? "请选择小红书账号(必选)"
+  const tiktok = PLATFORM === "tiktok";
+  const required = xhs || tiktok;
+  const creatorOnly = PLATFORM === "douyin" && $("w-mode") && $("w-mode").value === "creator";
+  const list = tiktok
+    ? ACCOUNTS.filter(a => a.status === "active" && a.has_storage)
+    : creatorOnly ? ACCOUNTS.filter(a => a.has_creator) : ACCOUNTS;
+  const ph = required ? "请选择" + PF_NAME[PLATFORM] + "账号(必选)"
     : (creatorOnly && list.length === 0 ? "无创作者账号,请先创作者登录" : "不指定账号");
   sel.innerHTML = accOptions(list, ph);
-  if (xhs && list.length) sel.value = String(list[0].id);
+  if (required && list.length) sel.value = String(list[0].id);
 }
 function populateDanmakuAccount() {
   const sel = $("d-w-acc"); if (!sel) return;
@@ -5994,9 +6007,12 @@ async function addMonitor() {
   if (normalizedTarget === null) return;
   const url_or_secuid = $("t-url").value.trim();
   if (!url_or_secuid) { toast(target_kind === "keyword" ? "请输入搜索关键词" : "请输入主页链接 / 短链 / id", "err"); return; }
-  if ((PLATFORM === "xhs" || PLATFORM === "douyin") && !$("t-acc").value) {
-    const platformName = PLATFORM === "xhs" ? "小红书" : "抖音";
-    if (!ACCOUNTS.length) { toast(`请先在「账号」里完成${platformName}扫码登录`, "err"); switchTab("accounts"); return; }
+  if (["xhs", "douyin", "tiktok"].includes(PLATFORM) && !$("t-acc").value) {
+    const platformName = PF_NAME[PLATFORM] || "当前平台";
+    const available = PLATFORM === "tiktok"
+      ? ACCOUNTS.filter(a => a.status === "active" && a.has_storage)
+      : ACCOUNTS;
+    if (!available.length) { toast(`请先在「账号」里完成${platformName}扫码登录`, "err"); switchTab("accounts"); return; }
     toast(`${platformName}监控必须选择一个已登录账号`, "err"); return;
   }
   const downloadMode = $("t-download").value;
@@ -7028,9 +7044,13 @@ async function addWatch() {
   if (normalizedTarget === null) return;
   const url_or_id = $("w-url").value.trim();
   if (!url_or_id) { toast("请粘贴视频链接 / 账号主页 / sec_uid", "err"); return; }
-  if (PLATFORM === "xhs" && !$("w-acc").value) {
-    if (!ACCOUNTS.length) { toast("请先在「账号」里完成小红书扫码登录", "err"); switchTab("accounts"); return; }
-    toast("小红书评论监控必须选择一个已登录账号", "err"); return;
+  if (["xhs", "tiktok"].includes(PLATFORM) && !$("w-acc").value) {
+    const platformName = PF_NAME[PLATFORM] || "当前平台";
+    const available = PLATFORM === "tiktok"
+      ? ACCOUNTS.filter(a => a.status === "active" && a.has_storage)
+      : ACCOUNTS;
+    if (!available.length) { toast("请先在「账号」里完成" + platformName + "登录", "err"); switchTab("accounts"); return; }
+    toast(platformName + "评论监控必须选择一个已登录账号", "err"); return;
   }
   $("w-msg").textContent = "解析中…";
   await withBusy(btn, "解析中", async () => {
@@ -7039,7 +7059,7 @@ async function addWatch() {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           url_or_id, platform: PLATFORM, kind: $("w-kind").value,
-          mode: PLATFORM === "xhs" ? "public" : $("w-mode").value,
+          mode: PLATFORM === "douyin" ? $("w-mode").value : "public",
           account_id: $("w-acc").value ? +$("w-acc").value : null,
           interval_seconds: monitorIntervalSeconds("w-interval"),
           recent_works: +$("w-recent").value,
