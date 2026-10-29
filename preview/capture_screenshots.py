@@ -1,4 +1,4 @@
-"""Capture README images from the current UI and the isolated static demo.
+"""Capture public guide images from the current UI and the isolated static demo.
 
 Run from the repository root: python -m preview.capture_screenshots
 No backend, real account, persisted browser profile, or external requests are used.

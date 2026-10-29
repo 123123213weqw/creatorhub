@@ -416,7 +416,7 @@ class Controller:
             os.startfile(str(self.home if name == "open_data" else self.home / "logs"))
         elif name == "open_guide":
             slug = data.get("platform", "")
-            if slug not in {"", "douyin", "xhs", "kuaishou", "shipinhao"}:
+            if slug not in {"", "douyin", "xhs", "kuaishou", "shipinhao", "tiktok"}:
                 raise ValueError("请选择有效的平台。")
             root = self.url + "/guide/" if self.url and (resources() / "desktop-guide").exists() else "https://3441293738.github.io/creatorhub/guide/"
             webbrowser.open(root + (slug + "/" if slug else ""))

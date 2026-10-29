@@ -4,6 +4,7 @@
   const realFetch = window.fetch.bind(window);
   const engineDefaults = {
     xhs_read_mode: "api", douyin_read_mode: "hybrid", douyin_write_mode: "browser",
+    tiktok_read_mode: "native",
     douyin_profile_mode: "hybrid", douyin_followers_mode: "hybrid",
     douyin_dm_sync_mode: "hybrid", douyin_creator_danmaku_mode: "hybrid",
     douyin_publish_mode: "browser",

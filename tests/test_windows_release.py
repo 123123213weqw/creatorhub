@@ -112,6 +112,20 @@ class WindowsReleaseTests(unittest.TestCase):
         self.assertIn('bundled.read_bytes() ==', smoke)
         self.assertIn('"desktop" / "web" / name', smoke)
 
+    def test_tiktok_and_multi_platform_regressions_gate_packaging(self):
+        steps = self.jobs['windows']['steps']
+        names = [step.get('name', step.get('uses')) for step in steps]
+        gate = 'Test TikTok and multi-platform compatibility'
+        self.assertLess(names.index(gate), names.index('Package Python, application and offline guide'))
+        checks = next(step['run'] for step in steps if step.get('name') == gate)
+        self.assertIn('python -m pytest', checks)
+        for test in ('test_tiktok_platform.py', 'test_tiktok_integration.py',
+                     'test_tiktok_download.py', 'test_tiktok_actions.py',
+                     'test_kuaishou_current.py', 'test_signature_protocols.py',
+                     'test_web_status_labels.py'):
+            self.assertIn(f'tests/{test}', checks)
+            self.assertTrue((ROOT / 'tests' / test).is_file())
+
     def test_draft_upload_publish_and_rerun_guard(self):
         script = self.jobs['release']['steps'][-1]['run']
         self.assertLess(script.index('sha256sum --check'), script.index('gh release create'))

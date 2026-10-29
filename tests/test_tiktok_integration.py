@@ -214,14 +214,17 @@ def test_tiktok_ui_exposes_supported_features_and_hides_publish_live():
     assert "tiktok" not in publish_body
     assert 'class="navitem dy-only" data-tab="danmaku"' in html
     assert 'class="navitem pub-only" data-tab="publish"' in html
-    assert 'class="navitem notsh-only tk-hide" data-tab="monitors"' in html
+    for tab in ("monitors", "comments"):
+        assert f'class="navitem notsh-only" data-tab="{tab}"' in html
+        assert f'class="navitem notsh-only tk-hide" data-tab="{tab}"' not in html
+    assert 'class="navitem notsh-only tk-hide" data-tab="autocomment"' in html
     assert 'class="navitem tk-hide" data-tab="hub"' not in html
     assert 'TikTok 用户搜索与互动' in html
     assert 'TikTok 手动评论任务' in html
     assert '代理已绑定（未检测）' in js
     assert 'rotating: "代理正常（轮换出口）"' in js
     assert '["ok", "rotating", "drifted"].includes(a.proxy_status)' in js
-    assert '["monitors", "comments", "autocomment"].includes(CURRENT_TAB)' in js
+    assert 'if (PLATFORM === "tiktok" && CURRENT_TAB === "autocomment")' in js
     main_source = (root / "app" / "main.py").read_text(encoding="utf-8")
     assert "await browser.close_context(identity.key)" in main_source
 

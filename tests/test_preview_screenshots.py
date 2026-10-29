@@ -6,20 +6,22 @@ import xml.etree.ElementTree as ET
 import pytest
 
 from preview.capture_screenshots import ROOT, SCENES, VIEWPORT
+from preview.build_preview import GUIDE_IMAGES
 
 
-def test_readme_and_capture_scenes_reference_the_same_images():
-    readme = (ROOT / "README.md").read_text(encoding="utf-8")
-    referenced = set(re.findall(r"assets/screenshots/([\w-]+\.png)", readme))
+def test_guide_images_have_capture_scenes():
+    guide = (ROOT / "guide" / "index.html").read_text(encoding="utf-8")
+    referenced = set(re.findall(r"images/([\w-]+\.png)", guide))
     names = [scene.filename for scene in SCENES]
     assert len(names) == len(set(names))
-    assert referenced == set(names)
+    assert referenced == set(GUIDE_IMAGES)
+    assert referenced <= set(names)
     assert {scene.theme for scene in SCENES} == {"light", "dark"}
     assert {scene.action for scene in SCENES} >= {"monitor", "publish", "dm"}
 
 
 @pytest.mark.parametrize("scene", SCENES, ids=lambda scene: scene.filename)
-def test_readme_image_dimensions(scene):
+def test_capture_image_dimensions(scene):
     header = (ROOT / "assets" / "screenshots" / scene.filename).read_bytes()[:24]
     assert header[:8] == b"\x89PNG\r\n\x1a\n"
     width, height = struct.unpack(">II", header[16:24])

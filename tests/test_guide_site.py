@@ -7,10 +7,13 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 import os
+import re
 from unittest.mock import patch
 from urllib.parse import unquote, urlsplit
 
 from preview.build_preview import ROOT, GUIDE, GUIDE_IMAGES, build, build_guide
+
+PLATFORMS = ("douyin", "xhs", "kuaishou", "shipinhao", "tiktok")
 
 
 class Links(HTMLParser):
@@ -43,7 +46,8 @@ class GuideSiteTests(unittest.TestCase):
         self.assertEqual(len(page.ids), len(set(page.ids)))
         required = {"welcome", "install", "accounts", "first-task", "monitor",
                     "collection", "comments", "download", "publish", "my-content",
-                    "autocomment", "notifications", "queue", "settings", "backup",
+                    "tiktok-tools", "autocomment", "notifications", "queue",
+                    "settings", "browser-environment", "cli-download", "backup",
                     "faq", "help"}
         self.assertTrue(required.issubset(page.ids))
         for section in required:
@@ -66,9 +70,48 @@ class GuideSiteTests(unittest.TestCase):
             build_guide(target)
             actual = {p.relative_to(target).as_posix() for p in target.rglob("*") if p.is_file()}
             expected = {"index.html", "guide.css"} | {f"images/{name}" for name in GUIDE_IMAGES}
-            expected |= {f"{platform}/index.html" for platform in ("douyin", "xhs", "kuaishou", "shipinhao")}
+            expected |= {f"{platform}/index.html" for platform in PLATFORMS}
             self.assertEqual(actual, expected)
             self.assertEqual((target / "guide.css").read_bytes(), (GUIDE / "guide.css").read_bytes())
+
+    def test_readme_is_concise_entrypoint_with_resolvable_guide_links(self):
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        for text in ("## 平台能力", "## 快速开始", "## 使用文档", "在线预览", "TikTok"):
+            self.assertIn(text, readme)
+        for removed in ("## 界面预览", "## 常见问题", "## 基本使用",
+                        "assets/screenshots/", "Spider_XHS"):
+            self.assertNotIn(removed, readme)
+        with TemporaryDirectory() as tmp:
+            target = Path(tmp)
+            build_guide(target)
+            links = re.findall(r"\]\((https://3441293738\.github\.io/creatorhub/guide/[^)]*)\)", readme)
+            self.assertTrue(links)
+            for platform in PLATFORMS:
+                self.assertIn(f"https://3441293738.github.io/creatorhub/guide/{platform}/", links)
+            for link in links:
+                parsed = urlsplit(link)
+                page = target / parsed.path.removeprefix("/creatorhub/guide/")
+                if page.is_dir():
+                    page /= "index.html"
+                self.assertTrue(page.is_file(), link)
+                if parsed.fragment:
+                    self.assertIn(unquote(parsed.fragment), self.parse(page).ids)
+
+    def test_tiktok_page_covers_supported_workflows(self):
+        with TemporaryDirectory() as tmp:
+            target = Path(tmp)
+            build_guide(target)
+            page = target / "tiktok" / "index.html"
+            parsed = self.parse(page)
+            self.assertTrue({"collection", "monitor", "comments", "download",
+                             "my-content", "tiktok-tools"}.issubset(parsed.ids))
+            self.assertNotIn("publish", parsed.ids)
+            self.assertNotIn("autocomment", parsed.ids)
+            content = page.read_text(encoding="utf-8")
+            for text in ("TikTok Web", "native", "auto", "browser",
+                         "@username", "目标评论 ID", "原文", "结果待确认",
+                         "暂不支持直播、短视频弹幕和内容发布"):
+                self.assertIn(text, content)
 
     def test_readme_community_uses_direct_qr_images(self):
         readme = self.parse(ROOT / "README.md")
@@ -112,7 +155,7 @@ class GuideSiteTests(unittest.TestCase):
             # that alias; normalize both sides before checking containment.
             target = Path(tmp).resolve()
             build_guide(target)
-            for slug in ("douyin", "xhs", "kuaishou", "shipinhao"):
+            for slug in PLATFORMS:
                 page = target / slug / "index.html"
                 parsed_page = self.parse(page)
                 self.assertEqual(len(parsed_page.ids), len(set(parsed_page.ids)))

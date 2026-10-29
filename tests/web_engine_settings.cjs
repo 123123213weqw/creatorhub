@@ -71,12 +71,14 @@ function fixture(initial = {}) {
 
 (async () => {
   const f = fixture();
-  assert.equal(f.fields.length, 56);
+  assert.equal(f.fields.length, 57);
   assert(f.fields.every(el => el.disabled));
   await f.api.save(); assert.equal(f.calls.length, 0);
   await f.api.load();
   assert(f.fields.every(el => !el.disabled));
   assert.deepEqual(f.byName.douyin_read_mode.options.map(option => option.value), ['hybrid', 'api', 'browser']);
+  assert.deepEqual(f.byName.tiktok_read_mode.options.map(option => option.value), ['native', 'auto', 'browser']);
+  assert.equal(f.byName.tiktok_read_mode.value, 'native');
   assert.deepEqual(f.byName.douyin_profile_mode.options.map(option => option.value), ['hybrid', 'api', 'browser']);
   assert.deepEqual(f.byName.douyin_followers_mode.options.map(option => option.value), ['hybrid', 'api', 'browser']);
   assert.deepEqual(f.byName.douyin_dm_sync_mode.options.map(option => option.value), ['hybrid', 'api', 'browser']);
@@ -87,6 +89,7 @@ function fixture(initial = {}) {
   assert.equal(f.protectedUnload(), false);
   await f.api.save(); assert.equal(f.writes().length, 0);
   f.edit('xhs_read_mode', 'browser'); f.edit('douyin_read_mode', 'api');
+  f.edit('tiktok_read_mode', 'auto');
   f.edit('douyin_profile_mode', 'api'); f.edit('douyin_followers_mode', 'browser');
   f.edit('douyin_keyword_gap_seconds', '12.5'); f.edit('danmaku_recent_works', '6');
   f.edit('route_download_via_proxy', false); f.edit('work_health_interval_seconds', '5400');
@@ -95,7 +98,7 @@ function fixture(initial = {}) {
   await f.api.load(); assert.equal(f.byName.xhs_read_mode.value, 'browser', 'background refresh must preserve draft');
   await f.api.save();
   assert.deepEqual(JSON.parse(f.writes()[0].init.body), {
-    xhs_read_mode: 'browser', douyin_read_mode: 'api', douyin_profile_mode: 'api',
+    xhs_read_mode: 'browser', douyin_read_mode: 'api', tiktok_read_mode: 'auto', douyin_profile_mode: 'api',
     douyin_followers_mode: 'browser', douyin_keyword_gap_seconds: 12.5,
     danmaku_recent_works: 6, route_download_via_proxy: false,
     work_health_interval_seconds: 5400, xhs_comment_review_before_publish: false,
@@ -105,10 +108,11 @@ function fixture(initial = {}) {
   assert.equal(f.writes().length, 1, 'recommended values only fill the draft');
   assert(f.api.isDirty());
   await f.api.save(); assert.equal(f.state.values.xhs_read_mode, 'api');
+  assert.equal(f.state.values.tiktok_read_mode, 'native');
 
   for (const [key, value] of [['comment_recent_days', ''], ['comment_recent_days', '0'],
     ['comment_recent_days', '1.5'], ['xhs_request_jitter', '1.1'], ['request_timeout_seconds', 'NaN'],
-    ['xhs_read_mode', 'invalid'], ['scan_interval_seconds', '0'], ['scan_interval_seconds', '1.5'],
+    ['xhs_read_mode', 'invalid'], ['tiktok_read_mode', 'invalid'], ['scan_interval_seconds', '0'], ['scan_interval_seconds', '1.5'],
     ['scan_interval_seconds', '86401'], ['work_health_interval_seconds', '599']]) {
     const invalid = fixture(); await invalid.api.load(); invalid.edit(key, value); await invalid.api.save();
     assert.equal(invalid.writes().length, 0, key);
