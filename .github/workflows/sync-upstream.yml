@@ -1,0 +1,122 @@
+name: Sync and validate CreatorHub upstream
+
+on:
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/sync-upstream.yml"
+      - ".github/ci/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: upstream-sync-${{ github.event_name == 'pull_request' && github.event.pull_request.number || 'main' }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    if: github.repository == '123123213weqw/creatorhub'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      changed: ${{ steps.prepare.outputs.changed }}
+      base: ${{ steps.prepare.outputs.base }}
+      upstream: ${{ steps.prepare.outputs.upstream }}
+      candidate: ${{ steps.prepare.outputs.candidate }}
+      bundle_sha256: ${{ steps.prepare.outputs.bundle_sha256 }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Test sync guards with disposable offline Git repositories
+        run: python3 .github/ci/test_upstream_sync.py
+      - name: Prepare candidate without write credentials
+        id: prepare
+        run: python3 .github/ci/upstream_sync.py prepare --artifact "$RUNNER_TEMP/upstream-candidate"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: steps.prepare.outputs.changed == 'true'
+        with:
+          name: upstream-candidate
+          path: ${{ runner.temp }}/upstream-candidate/
+          retention-days: 3
+          if-no-files-found: error
+
+  regression:
+    needs: prepare
+    if: needs.prepare.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      EXPECTED_BASE: ${{ needs.prepare.outputs.base }}
+      EXPECTED_UPSTREAM: ${{ needs.prepare.outputs.upstream }}
+      EXPECTED_CANDIDATE: ${{ needs.prepare.outputs.candidate }}
+      EXPECTED_BUNDLE_SHA256: ${{ needs.prepare.outputs.bundle_sha256 }}
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ needs.prepare.outputs.base }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: upstream-candidate
+          path: ${{ runner.temp }}/upstream-candidate/
+      - name: Verify artifact and check out exact candidate
+        run: python3 .github/ci/upstream_sync.py checkout --artifact "$RUNNER_TEMP/upstream-candidate"
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11"
+      - name: Install test dependencies (PyExecJS is a pure-Python source package)
+        run: >-
+          python -m pip install --only-binary=:all: --no-binary=PyExecJS
+          -r requirements.txt pytest==8.4.2
+      - name: Offline Douyin login, API and risk-control regressions
+        run: >-
+          python -m pytest -q
+          tests/test_account_auth_health.py
+          tests/test_douyin_login.py
+          tests/test_douyin_api_session.py
+          tests/test_douyin_web_request_signing.py
+          tests/test_risk_control.py
+          tests/test_risk_pacing.py
+          tests/test_risk_api_gates.py
+          tests/test_risk_admin.py
+          tests/test_write_gates.py
+          tests/test_keyword_collection.py
+          tests/test_kuaishou_current.py
+          tests/test_web_status_labels.py
+
+  publish-source:
+    needs: [prepare, regression]
+    if: >-
+      needs.prepare.outputs.changed == 'true' &&
+      github.repository == '123123213weqw/creatorhub' &&
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      EXPECTED_BASE: ${{ needs.prepare.outputs.base }}
+      EXPECTED_UPSTREAM: ${{ needs.prepare.outputs.upstream }}
+      EXPECTED_CANDIDATE: ${{ needs.prepare.outputs.candidate }}
+      EXPECTED_BUNDLE_SHA256: ${{ needs.prepare.outputs.bundle_sha256 }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ needs.prepare.outputs.base }}
+          fetch-depth: 0
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: upstream-candidate
+          path: ${{ runner.temp }}/upstream-candidate/
+      - name: Push tested source only; no upstream checkout or deployment
+        run: python3 .github/ci/upstream_sync.py publish --artifact "$RUNNER_TEMP/upstream-candidate"
