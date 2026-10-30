@@ -4,6 +4,15 @@
 
 [在线预览](https://3441293738.github.io/creatorhub/) · [平台能力](#平台能力) · [使用指南](https://3441293738.github.io/creatorhub/guide/) · [下载安装](https://github.com/3441293738/creatorhub/releases/latest) · [问题反馈](https://github.com/3441293738/creatorhub/issues) · [交流群](#交流群)
 
+<p align="center">
+  <a href="https://3441293738.github.io/creatorhub/">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="assets/hero-banner-dark.svg">
+      <img alt="CreatorHub 本地多平台内容管理工作台动态架构预览" src="assets/hero-banner.svg" width="100%">
+    </picture>
+  </a>
+</p>
+
 统一管理账号、采集与监控内容、下载素材和处理发布及互动任务。账号登录态、数据库与媒体文件保存在本地，各平台能力以[使用指南](https://3441293738.github.io/creatorhub/guide/#welcome)为准。
 
 > 在线预览使用脱敏示例数据，仅展示界面与交互；真实登录、采集、下载和发布需要在本地运行。
@@ -73,9 +82,21 @@ chmod +x start.sh
   <img alt="CreatorHub Star History Chart" src="https://raw.githubusercontent.com/3441293738/creatorhub/star-history/assets/star-history.svg">
 </picture>
 
-## 使用须知
+## 赞助商
 
-本项目用于技术学习和个人内容管理，不提供账号、Cookie、代理或平台数据。使用时请遵守目标平台规则及所在地法律法规，并尊重内容版权和个人隐私。
+<p align="center">
+  <a href="https://www.ipwo.net/?code=PPBFE3E2F" target="_blank" rel="noopener noreferrer">
+    <img src="assets/sponsors/ipwo-banner.jpg" alt="IPWO 住宅代理：195+ 地区，多协议适配，动态 / 静态 / 不限量代理" width="100%">
+  </a>
+</p>
+
+<p align="center">
+  <a href="https://www.ipwo.net/?code=PPBFE3E2F" target="_blank" rel="noopener noreferrer">IPWO</a>
+  住宅代理资源，适用于爬虫开发、数据研究、市场分析等场景，为开发者探索更多数据应用方向提供支持。
+  <br>
+  覆盖 195+ 地区，包含动态代理 / 静态代理 / 不限量代理，支持 HTTP / HTTPS / SOCKS5 多种协议。
+  可免费试用，优惠折扣码：<code>0201</code>。
+</p>
 ## 交流群
 
 欢迎加入 **CreatorHub 交流群**，交流使用经验、问题反馈和功能建议。
@@ -104,22 +125,10 @@ chmod +x start.sh
   入群遇到问题，也可以添加作者微信联系。
 </p>
 
-## 赞助商
-
-<p align="center">
-  <a href="https://www.ipwo.net/?code=PPBFE3E2F" target="_blank" rel="noopener noreferrer">
-    <img src="assets/sponsors/ipwo-banner.jpg" alt="IPWO 住宅代理：195+ 地区，多协议适配，动态 / 静态 / 不限量代理" width="100%">
-  </a>
-</p>
-
-<p align="center">
-  <a href="https://www.ipwo.net/?code=PPBFE3E2F" target="_blank" rel="noopener noreferrer">IPWO</a>
-  住宅代理资源，适用于爬虫开发、数据研究、市场分析等场景，为开发者探索更多数据应用方向提供支持。
-  <br>
-  覆盖 195+ 地区，包含动态代理 / 静态代理 / 不限量代理，支持 HTTP / HTTPS / SOCKS5 多种协议。
-  可免费试用，优惠折扣码：<code>0201</code>。
-</p>
-
 ## 友链
 
 - [LINUX DO](https://linux.do/) — 感谢社区提供的帮助与支持。
+
+## 使用须知
+
+本项目用于技术学习和个人内容管理，不提供账号、Cookie、代理或平台数据。使用时请遵守目标平台规则及所在地法律法规，并尊重内容版权和个人隐私。
