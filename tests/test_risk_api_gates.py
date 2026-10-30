@@ -606,7 +606,10 @@ class RiskApiGateTests(unittest.TestCase):
 
         self.assertIsNone(default)
         self.assertIsNone(detailed[0])
-        self.assertIs(detailed[1], error)
+        # Python 3.11's asyncio future bridge recreates TimeoutError instances.
+        # Preserve the actual error type and arguments, not cross-thread identity.
+        self.assertIsInstance(detailed[1], TimeoutError)
+        self.assertEqual(detailed[1].args, error.args)
 
     def test_creator_helpers_detailed_mode_preserves_failure_responses(self):
         response = {

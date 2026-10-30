@@ -17,6 +17,7 @@
 - 配置 PR 自身会执行 prepare 与 regression，但绝不执行 publish-source。
 - 合并后可在 Actions 的 **Sync and validate CreatorHub upstream** 中点击 **Run workflow** 验证首轮发布。
 - 成功同步仅代表这些离线回归通过，不代表完整测试、实际账号登录或线上部署已验收。
+- runner 固定为 Ubuntu 24.04、测试 Python 固定为 3.11；所用 Actions 固定到已核对的完整提交 SHA。
 - GitHub 定时任务可能延迟；公开仓库长期无活动时，平台可能自动停用定时任务。可用手动运行恢复检查。
 
 ## 失败处理
