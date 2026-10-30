@@ -760,6 +760,47 @@ class KeywordCollectionEditTests(unittest.TestCase):
         self.assertEqual(result["account_id"], account_id)
         self.assertEqual(result["search_sort"], "most_liked")
 
+    def test_kuaishou_creator_collection_resolves_share_link_to_user_id(self):
+        with db.get_session() as session:
+            account = DouyinAccount(
+                platform="kuaishou", nickname="快手采集账号", status="active",
+                storage_state='{"cookies":[{"name":"passToken","value":"fixture"}]}',
+            )
+            session.add(account); session.commit(); session.refresh(account)
+            account_id = account.id
+
+        with patch("app.main.resolve_ks_user_id", new_callable=AsyncMock) as resolve:
+            resolve.return_value = "3xRESOLVEDUSERID"
+            result = asyncio.run(create_keyword_collection(self._body(
+                platform="kuaishou", account_id=account_id,
+                source_type="creator", keywords=[],
+                source_ref="https://v.kuaishou.com/nQ1ZMinX 看了这么多快手，还是「中国新闻社」最好玩了！",
+                source_name="创作者 https://v.kuaishou.com/nQ1ZMinX 看了这么多快手，还是「中国新闻社」最好玩了！")))
+
+        resolve.assert_awaited_once()
+        self.assertEqual(result["source_type"], "creator")
+        self.assertEqual(result["source_ref"], "3xRESOLVEDUSERID")
+        self.assertEqual(result["source_name"], "创作者 3xRESOLVEDUSERID")
+
+    def test_kuaishou_creator_collection_rejects_unresolvable_source(self):
+        with db.get_session() as session:
+            account = DouyinAccount(
+                platform="kuaishou", nickname="快手采集账号", status="active",
+                storage_state='{"cookies":[{"name":"passToken","value":"fixture"}]}',
+            )
+            session.add(account); session.commit(); session.refresh(account)
+            account_id = account.id
+
+        with patch("app.main.resolve_ks_user_id", new_callable=AsyncMock) as resolve:
+            resolve.return_value = None
+            with self.assertRaises(HTTPException) as caught:
+                asyncio.run(create_keyword_collection(self._body(
+                    platform="kuaishou", account_id=account_id,
+                    source_type="creator", keywords=[],
+                    source_ref="https://v.kuaishou.com/deadlink")))
+
+        self.assertEqual(caught.exception.status_code, 400)
+
     def test_channels_collection_only_accepts_current_account_works(self):
         with db.get_session() as session:
             account = DouyinAccount(

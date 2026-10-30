@@ -5408,6 +5408,36 @@ function collectionSourceChanged() {
   applyCollectionForm();
   if (collectionSourceValue() === "favorite_board") loadCollectionFavoriteBoards();
 }
+// 采集来源下拉按平台重建:不适用当前平台的选项直接移除(而非 disabled/hidden),
+// 部分浏览器(如 Firefox)对 <option hidden> 不生效,仍会显示灰色禁用项。
+const COL_SOURCE_DEFS = [
+  { value: "keyword", label: "关键词搜索" },
+  { value: "creator", label: "创作者主页" },
+  { value: "favorite_all", label: "全部收藏", xhs: true },
+  { value: "favorite_board", label: "指定收藏夹", xhs: true },
+  { value: "account_works", label: "本账号作品", channels: true },
+];
+function rebuildCollectionSources(xhs, channels, tiktok) {
+  const sel = $("col-source");
+  if (!sel) return;
+  const current = sel.value;
+  sel.innerHTML = "";
+  for (const o of COL_SOURCE_DEFS) {
+    let keep;
+    if (o.channels) keep = channels;
+    else if (o.xhs) keep = xhs;
+    else keep = !channels && !(tiktok && o.value !== "keyword");
+    if (!keep) continue;
+    const opt = document.createElement("option");
+    opt.value = o.value;
+    opt.textContent = o.label;
+    sel.appendChild(opt);
+  }
+  if ([...sel.options].some(o => o.value === current)) sel.value = current;
+  else if (channels) sel.value = "account_works";
+  else if (tiktok) sel.value = "keyword";
+  else sel.value = "keyword";
+}
 function applyCollectionForm() {
   const enabled = !!($("col-download") && $("col-download").checked);
   if ($("col-dir-wrap")) $("col-dir-wrap").style.display = enabled ? "" : "none";
@@ -5415,15 +5445,7 @@ function applyCollectionForm() {
   const channels = PLATFORM === "shipinhao";
   const tiktok = PLATFORM === "tiktok";
   const platformName = PF_NAME[PLATFORM] || "平台";
-  document.querySelectorAll("#col-source [data-xhs-source]").forEach(option => { option.disabled = !xhs; option.hidden = !xhs; });
-  document.querySelectorAll("#col-source option:not([data-xhs-source]):not([data-channels-source])").forEach(option => {
-    const blocked = channels || (tiktok && option.value !== "keyword");
-    option.disabled = blocked; option.hidden = blocked;
-  });
-  document.querySelectorAll("#col-source [data-channels-source]").forEach(option => { option.disabled = !channels; option.hidden = !channels; });
-  if (channels) $("col-source").value = "account_works";
-  else if (tiktok) $("col-source").value = "keyword";
-  else if (["favorite_all", "favorite_board", "account_works"].includes(collectionSourceValue())) $("col-source").value = "keyword";
+  rebuildCollectionSources(xhs, channels, tiktok);
   const source = collectionSourceValue();
   const favorite = ["favorite_all", "favorite_board"].includes(source);
   const alternate = source !== "keyword";
@@ -5445,7 +5467,7 @@ function applyCollectionForm() {
   if ($("col-page-limit-label")) $("col-page-limit-label").innerHTML = channels ? '作品页采集深度 <span class="field-scope">1–40 页</span>' : '每词采集深度 <span class="field-scope">1–40 页</span>';
   if ($("col-sort-wrap")) $("col-sort-wrap").style.display = channels ? "none" : "";
   if ($("col-page-help")) $("col-page-help").textContent = channels ? "依次读取视频与图文管理页，滚动加载本账号作品。" : xhs ? "一页对应一次搜索结果下滑或接口翻页。" : "一页对应一次搜索结果下滑。";
-  if ($("col-source-ref")) $("col-source-ref").placeholder = PLATFORM === "douyin" ? "抖音 sec_uid" : PLATFORM === "xhs" ? "小红书 user_id" : "快手 user_id / 3x ID";
+  if ($("col-source-ref")) $("col-source-ref").placeholder = PLATFORM === "douyin" ? "抖音 sec_uid" : PLATFORM === "xhs" ? "小红书 user_id" : "快手 user_id / 主页链接 / 短链 / 分享文案";
   if ($("col-replies-help")) $("col-replies-help").textContent = `采集${platformName}当前可返回的回复`;
   if ($("collection-callout-title")) $("collection-callout-title").textContent = channels ? "仅采集当前登录视频号账号自己的已发布作品" : "作品上限、采集深度和停止条件任一满足即结束";
   if ($("collection-callout-copy")) $("collection-callout-copy").textContent = channels

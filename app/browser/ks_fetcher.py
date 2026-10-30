@@ -29,6 +29,20 @@ PROFILE_URL = "https://www.kuaishou.com/profile/{uid}"
 PHOTO_URL = "https://www.kuaishou.com/short-video/{pid}"
 SEARCH_URL = "https://www.kuaishou.com/search/video?searchKey={keyword}"
 
+# 快手新版页面把作品流/评论区放在可滚容器里,滚 window 不会触发翻页;
+# 统一滚动所有真正可滚的容器(window 兜底),否则 /rest/v/profile/feed
+# 只会发首页请求,单轮永远停在 ~20 条。
+_SCROLL_ALL_JS = """() => {
+  window.scrollTo(0, document.body.scrollHeight);
+  for (const el of document.querySelectorAll('*')) {
+    const style = getComputedStyle(el);
+    if ((style.overflowY === 'auto' || style.overflowY === 'scroll')
+        && el.scrollHeight > el.clientHeight + 20) {
+      el.scrollTop = el.scrollHeight;
+    }
+  }
+}"""
+
 
 def _rf(d: dict, *keys, default=""):
     for k in keys:
@@ -75,6 +89,35 @@ def _feed_id(feed: dict) -> str:
     return str(_rf(photo, "id", "photoId", "photo_id", default="") or "")
 
 
+def _feed_ts(feed: dict) -> int:
+    """从快手 feed 项里取出作品发布时间(秒)。timestamp 是毫秒。"""
+    if not isinstance(feed, dict):
+        return 0
+    photo = feed.get("photo") if isinstance(feed.get("photo"), dict) else feed
+    raw = _rf(photo, "timestamp", "createTime", "create_time", default=0)
+    try:
+        ts = int(raw)
+    except (TypeError, ValueError):
+        return 0
+    return ts // 1000 if ts > 10_000_000_000 else ts
+
+
+def _ks_page_reaches_boundary(items: list, known_ids: set, stop_before: int = 0) -> bool:
+    """一整批作品都已见过 / 早于监控起点时,才认为翻到了历史边界。
+
+    置顶作品会把旧 ID 混在首页,不能因为单个旧 ID 就停止(对标抖音
+    _page_reaches_boundary)。"""
+    rows = [it for it in items if _feed_id(it)]
+    if not rows:
+        return False
+    if known_ids and all(_feed_id(it) in known_ids for it in rows):
+        return True
+    if stop_before:
+        times = [_feed_ts(it) for it in rows]
+        return bool(times) and all(ts and ts < stop_before for ts in times)
+    return False
+
+
 def _search_feeds(data: dict) -> list:
     """兼容快手 REST 搜索与 GraphQL 搜索的常见响应外形。"""
     values = _dig_rest_feeds(data)
@@ -103,9 +146,11 @@ def _dig_profile(data: dict) -> Optional[dict]:
 
 
 def _dig_comments(data: dict) -> list:
-    """从评论响应里挖出评论数组。兼容两套:
+    """从评论响应里挖出评论数组。兼容多套:
       - REST v2:顶层 rootCommentsV2 / subCommentsV2(现行)
-      - 旧 GraphQL:data.visionCommentList.rootComments(兜底)"""
+      - REST v2:data.rootCommentsV2 / data.comments / data.commentList
+      - 旧 GraphQL:data.visionCommentList / commentListQuery(兜底)
+      - 兜底:递归找任意层级「comment 命名键」下的列表(操作名/层级再变也能挖到)"""
     if not isinstance(data, dict):
         return []
     for key in ("rootCommentsV2", "subCommentsV2", "rootComments"):
@@ -113,16 +158,58 @@ def _dig_comments(data: dict) -> list:
         if isinstance(v, list):
             return v
     d = data.get("data") or {}
-    for key in ("visionCommentList", "commentListQuery"):
-        v = d.get(key)
-        if isinstance(v, dict):
-            # 2026 详情页 commentListQuery 已切到 rootCommentsV2；旧解析只看
-            # rootComments，导致页面明明显示评论却返回空列表。
-            rc = (v.get("rootCommentsV2") or v.get("rootComments")
-                  or v.get("commentList") or v.get("comments"))
-            if isinstance(rc, list):
-                return rc
-    return []
+    if isinstance(d, dict):
+        # 评论字段随版本变,先看 data 下直接挂的列表,再看嵌套容器。
+        for key in ("rootCommentsV2", "subCommentsV2", "rootComments",
+                    "commentList", "comments"):
+            v = d.get(key)
+            if isinstance(v, list):
+                return v
+        for key in ("visionCommentList", "commentListQuery"):
+            v = d.get(key)
+            if isinstance(v, dict):
+                # 2026 详情页 commentListQuery 已切到 rootCommentsV2；旧解析只看
+                # rootComments，导致页面明明显示评论却返回空列表。
+                rc = (v.get("rootCommentsV2") or v.get("rootComments")
+                      or v.get("commentList") or v.get("comments"))
+                if isinstance(rc, list):
+                    return rc
+    found = _comment_lists_under_comment_key(data)
+    return found[0] if found else []
+
+
+def _looks_like_comment(item) -> bool:
+    """判断单个 dict 是否像一条评论(带评论 id + 文本/作者字段)。"""
+    if not isinstance(item, dict):
+        return False
+    has_id = ("commentId" in item or "comment_id" in item)
+    has_text = any(k in item for k in
+                   ("content", "text", "comment", "commentText", "comment_text"))
+    has_author = any(k in item for k in
+                     ("authorName", "author_name", "userName", "user_name", "name"))
+    return has_id and (has_text or has_author)
+
+
+def _comment_lists_under_comment_key(node, depth: int = 0, out: Optional[list] = None) -> list:
+    """递归收集任意层级下的评论数组(评论接口改版兜底):
+      - 键名含 comment 的 dict 列表;或
+      - 首元素本身长得像评论(带 commentId/comment_id)的列表,不管键名。"""
+    if out is None:
+        out = []
+    if depth > 8 or not isinstance(node, (dict, list)):
+        return out
+    if isinstance(node, dict):
+        for k, v in node.items():
+            if isinstance(v, list) and v and all(isinstance(x, dict) for x in v):
+                if ("comment" in str(k).lower()
+                        or _looks_like_comment(v[0])):
+                    out.append(v)
+                    continue
+            _comment_lists_under_comment_key(v, depth + 1, out)
+    else:
+        for item in node:
+            _comment_lists_under_comment_key(item, depth + 1, out)
+    return out
 
 
 async def fetch_ks_search(mgr: BrowserManager, identity: Identity, keyword: str,
@@ -181,16 +268,7 @@ async def fetch_ks_search(mgr: BrowserManager, identity: Identity, keyword: str,
         for _ in range(max(1, min(40, int(max_scrolls or 1)))):
             before = len(collected)
             try:
-                await page.evaluate("""() => {
-                  window.scrollTo(0, document.body.scrollHeight);
-                  for (const el of document.querySelectorAll('*')) {
-                    const style = getComputedStyle(el);
-                    if ((style.overflowY === 'auto' || style.overflowY === 'scroll')
-                        && el.scrollHeight > el.clientHeight + 20) {
-                      el.scrollTop = el.scrollHeight;
-                    }
-                  }
-                }""")
+                await page.evaluate(_SCROLL_ALL_JS)
             except Exception:
                 pass
             await page.mouse.wheel(0, 4200)
@@ -226,12 +304,16 @@ async def fetch_ks_search(mgr: BrowserManager, identity: Identity, keyword: str,
 async def fetch_ks_videos(mgr: BrowserManager, identity: Identity, user_id: str,
                           known_ids: Set[str], max_scrolls: int = 12,
                           settle_ms: int = 1800, block_media: bool = True,
-                          open_url: str = ""
+                          open_url: str = "", stop_before: int = 0,
+                          min_scrolls: int = 2
                           ) -> Tuple[List[dict], Optional[dict], str]:
     """打开创作者主页并下滑,拦截 GraphQL 收集作品 feeds。
     返回 (新作品 feed 列表, 作者 userProfile dict, error)。
-    open_url 非空时直接打开它(如站内「我」入口解析出的自己主页链接)。"""
+    open_url 非空时直接打开它(如站内「我」入口解析出的自己主页链接)。
+    stop_before>0 时,翻到整页都早于该时间戳(秒)即停止,用于历史回填边界;
+    min_scrolls 保证至少真实滚动几次,避免首屏置顶旧作品直接截断扫描。"""
     collected: Dict[str, dict] = {}
+    pages: List[List[dict]] = []   # 每批响应新增的作品(边界判断用,对标抖音 post_pages)
     author: Optional[dict] = None
     error = ""
     api_seen: list = []          # 诊断:看到的 GraphQL operation + 其它响应路径
@@ -248,6 +330,7 @@ async def fetch_ks_videos(mgr: BrowserManager, identity: Identity, user_id: str,
             except Exception:
                 return
             items = _dig_rest_feeds(data)
+            batch: List[dict] = []
             for it in items:
                 photo = it.get("photo") if isinstance(it, dict) else None
                 if not isinstance(photo, dict):
@@ -255,11 +338,15 @@ async def fetch_ks_videos(mgr: BrowserManager, identity: Identity, user_id: str,
                 pid = str(_rf(photo, "id", "photoId", "photo_id", default=""))
                 if not pid:
                     continue
+                if pid not in collected:
+                    batch.append(it)
                 collected[pid] = it       # 整项带 photo,交 _norm_ks_work 统一归一
                 if not feed_sample:
                     feed_sample.append("photo=" + str(photo)[:1100])   # 核对 photo 字段名
                 if author is None and it.get("author"):
                     author = {"profile": it["author"]}
+            if batch:
+                pages.append(batch)
             return
         if GRAPHQL_API in resp.url:
             # GraphQL 都打到 /graphql,operationName 在请求体里 —— 取出来看到底发了哪些查询
@@ -282,13 +369,18 @@ async def fetch_ks_videos(mgr: BrowserManager, identity: Identity, user_id: str,
             data = await resp.json()
         except Exception:
             return
+        batch = []
         for feed in _dig_feeds(data):
             photo = (feed.get("photo") or {}) if isinstance(feed, dict) else {}
             pid = str(photo.get("id") or feed.get("id") or "")
             if pid:
+                if pid not in collected:
+                    batch.append(feed)
                 collected[pid] = feed
                 if author is None and feed.get("author"):
                     author = {"profile": feed["author"]}
+        if batch:
+            pages.append(batch)
         up = _dig_profile(data)
         if up and author is None:
             author = up
@@ -300,12 +392,24 @@ async def fetch_ks_videos(mgr: BrowserManager, identity: Identity, user_id: str,
                         wait_until="domcontentloaded", timeout=30000)
         await page.wait_for_timeout(settle_ms)
         stagnant = 0
-        for _ in range(max_scrolls):
-            if known_ids & set(collected.keys()):     # 翻到旧内容了
-                break
+        min_scrolls = max(1, min(min_scrolls, max_scrolls))
+        for scroll_index in range(max_scrolls):
             before = len(collected)
+            pages_before = len(pages)
+            # 作品流在可滚容器里,仅 mouse.wheel 滚 window 无法触发下一页
+            # /rest/v/profile/feed;先滚容器再兜底滚 window。
+            try:
+                await page.evaluate(_SCROLL_ALL_JS)
+            except Exception:
+                pass
             await page.mouse.wheel(0, 4000)
             await page.wait_for_timeout(settle_ms)
+            fresh_pages = pages[pages_before:]
+            boundary = any(_ks_page_reaches_boundary(p, known_ids, stop_before)
+                           for p in fresh_pages)
+            # 至少真实滚动几次,避免首屏里一个置顶旧作品直接截断扫描。
+            if scroll_index + 1 >= min_scrolls and boundary:
+                break
             if len(collected) == before:
                 stagnant += 1
                 if stagnant >= 2:
@@ -345,15 +449,48 @@ async def fetch_ks_comments(mgr: BrowserManager, identity: Identity, photo_id: s
     返回 (新评论原始列表, error)。"""
     collected: Dict[str, dict] = {}
     error = ""
+    api_seen: list = []       # 诊断:详情页发出的 xhr/fetch 响应路径(核对评论接口是否变更)
+    gql_shape: list = []      # 诊断:graphql 响应的 operationName + data 顶层键(定位评论结构)
+    gql_sample: list = []     # 诊断:疑似评论 graphql 响应的截断 JSON(定位字段层级)
     page = await mgr.new_page(identity, block_media)
 
     async def on_response(resp):
-        if COMMENT_API not in resp.url and GRAPHQL_API not in resp.url:
+        url = resp.url
+        is_graphql = GRAPHQL_API in url
+        is_rest_comment = "/comment" in url.lower()
+        # 快手评论现走 REST v2(/rest/v/photo/comment/*),也可能回退 graphql;
+        # 其它 xhr/fetch 路径只记录诊断,便于评论接口改版时核对。
+        if "kuaishou.com" in url and resp.request.resource_type in ("xhr", "fetch"):
+            if len(api_seen) < 60:
+                p = url.split("?")[0].split("kuaishou.com")[-1]
+                api_seen.append(f"{resp.status} {p}")
+        if not is_graphql and not is_rest_comment:
             return
+        operation = ""
+        if is_graphql:
+            try:
+                post_data = resp.request.post_data or ""
+                match = re.search(r'"operationName"\s*:\s*"([^"]+)"', post_data)
+                operation = match.group(1) if match else ""
+            except Exception:
+                pass
         try:
             data = await resp.json()
         except Exception:
             return
+        if is_graphql and len(gql_shape) < 40:
+            d = data.get("data") if isinstance(data, dict) else None
+            keys = list(d.keys()) if isinstance(d, dict) else []
+            gql_shape.append(f"{operation or '?'}->{keys}")
+            # 疑似评论的响应,截断存一份原始 JSON 便于核对字段层级。
+            if len(gql_sample) < 6 and (
+                    "comment" in operation.lower()
+                    or any("comment" in str(k).lower() for k in keys)):
+                try:
+                    gql_sample.append(
+                        f"{operation or '?'}:{json.dumps(d, ensure_ascii=False)[:800]}")
+                except Exception:
+                    pass
         for c in _dig_comments(data):
             cid = str((c or {}).get("comment_id") or (c or {}).get("commentId")
                       or (c or {}).get("id") or "")
@@ -365,23 +502,17 @@ async def fetch_ks_comments(mgr: BrowserManager, identity: Identity, photo_id: s
     try:
         await page.goto(PHOTO_URL.format(pid=photo_id),
                         wait_until="domcontentloaded", timeout=30000)
+        # 详情页比主页重(视频播放器 + 评论区异步渲染),多等一拍让首屏评论请求
+        # 发出;有视频流时 networkidle 不可靠,用固定延时兜底。
         await page.wait_for_timeout(settle_ms)
+        await page.wait_for_timeout(1200)
         stagnant = 0
         for _ in range(max_scrolls):
             before = len(collected)
             try:
                 # 新版详情页评论区是固定面板，滚 window 不会翻页；同时滚动所有
                 # 真正可滚容器，旧版页面则继续由 window.scrollTo 兜底。
-                await page.evaluate("""() => {
-                  window.scrollTo(0, document.body.scrollHeight);
-                  for (const el of document.querySelectorAll('*')) {
-                    const style = getComputedStyle(el);
-                    if ((style.overflowY === 'auto' || style.overflowY === 'scroll')
-                        && el.scrollHeight > el.clientHeight + 20) {
-                      el.scrollTop = el.scrollHeight;
-                    }
-                  }
-                }""")
+                await page.evaluate(_SCROLL_ALL_JS)
             except Exception:
                 pass
             await page.wait_for_timeout(settle_ms)
@@ -404,7 +535,11 @@ async def fetch_ks_comments(mgr: BrowserManager, identity: Identity, photo_id: s
         if "passport" in final_url or "/login" in final_url:
             error = "logged_out:登录态失效,请重新登录"
         else:
-            error = "未拦截到评论(评论区未加载或作品暂无评论)"
+            print(f"[ks_comments] photo_id={photo_id!r} final_url={final_url} "
+                  f"api_seen={api_seen} gql_shape={gql_shape}")
+            print(f"[ks_comments] gql_sample={gql_sample}")
+            sample = gql_sample[0][:600] if gql_sample else "无"
+            error = f"未拦截到评论; 评论响应样本={sample}"
     new = [c for cid, c in collected.items() if cid not in known_cids]
     return new, error
 

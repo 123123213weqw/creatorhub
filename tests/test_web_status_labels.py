@@ -33,7 +33,7 @@ def test_keyword_collection_supports_tiktok_with_channels_account_only_source():
     assert 'id="collection-create-title"' in html
     assert "新建${platformName}关键词采集" in source
     assert 'kuaishou: "快手"' in workbench
-    assert '"快手 user_id / 3x ID"' in source
+    assert '"快手 user_id / 主页链接 / 短链 / 分享文案"' in source
     assert 'value="account_works" data-channels-source>本账号作品' in html
     assert 'PLATFORM === "shipinhao" ? "account_works"' in source
     assert '新建视频号本账号作品采集' in source
@@ -41,6 +41,17 @@ def test_keyword_collection_supports_tiktok_with_channels_account_only_source():
     assert 'platform === "shipinhao" ? "新建视频号本账号作品采集"' in workbench
     assert "composerTitle(ctx.tab, ctx.platform)" in workbench
     assert "按平台支持的来源批量采集作品" in source[source.index("collections: {"):source.index("comments: {")]
+
+
+def test_kuaishou_collection_source_removes_inapplicable_options():
+    source = APP_JS.read_text(encoding="utf-8")
+
+    # 采集来源下拉改为按平台重建(物理移除不适用项),不再用 <option hidden> 灰显。
+    assert "rebuildCollectionSources(xhs, channels, tiktok)" in source
+    assert 'function rebuildCollectionSources' in source
+    assert '{ value: "favorite_all", label: "全部收藏", xhs: true }' in source
+    assert '{ value: "account_works", label: "本账号作品", channels: true }' in source
+    assert "option.hidden = !xhs" not in source
 
 
 def test_keyword_collection_results_have_card_layout_and_file_preview_actions():

@@ -2213,7 +2213,7 @@
         <div class="form-grid cols-4">
           <div class="form-field"><label for="col-source">采集来源</label><select id="col-source" onchange="collectionSourceChanged()"><option value="keyword">关键词搜索</option><option value="creator">创作者主页</option><option value="favorite_all" data-xhs-source>全部收藏</option><option value="favorite_board" data-xhs-source>指定收藏夹</option><option value="account_works" data-channels-source>本账号作品</option></select></div>
           <div class="form-field xhs-only" id="col-board-wrap" style="display:none"><label for="col-board">收藏夹</label><select id="col-board"><option value="">先选择账号并加载</option></select><p class="hint" id="col-board-help"></p></div>
-          <div class="form-field" id="col-source-ref-wrap" style="display:none"><label for="col-source-ref">创作者用户 ID</label><input id="col-source-ref" placeholder="抖音 sec_uid / 小红书 user_id / 快手 3x ID"><p class="hint">使用公开主页作品列表，评论和下载继续沿用下方设置。</p></div>
+          <div class="form-field" id="col-source-ref-wrap" style="display:none"><label for="col-source-ref">创作者用户 ID</label><input id="col-source-ref" placeholder="抖音 sec_uid / 小红书 user_id / 快手 user_id 或主页链接或短链"><p class="hint">使用公开主页作品列表，评论和下载继续沿用下方设置。快手可粘贴完整分享文案或 v.kuaishou.com 短链自动解析。</p></div>
         </div>
         <div class="form-field" id="col-keywords-wrap">
           <label for="col-keywords">关键词 <span class="field-scope">必填 · 最多 20 个</span></label>

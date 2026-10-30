@@ -7066,6 +7066,27 @@ def _validated_collection_input(body: KeywordCollectionIn) \
     return platform, keywords, quality, download_dir, options
 
 
+async def _resolve_ks_creator_source(body: KeywordCollectionIn) -> None:
+    """把快手创作者采集的 source_ref 解析为可直开主页的 3x user_id。
+
+    与作品监控保持一致：接受完整分享文案 / 创作者主页链接 / v.kuaishou.com
+    短链 / user_id。解析成功后就地改写 body.source_ref，这样幂等提交的
+    payload 哈希与实际入库的目标一致（重复提交同一 key 不会哈希不一致）。
+    同时把前端按原始输入生成的「创作者 {原文案}」显示名替换成解析后的 ID。
+    """
+    if (body.platform.strip().lower() == "kuaishou"
+            and body.source_type.strip().lower() == "creator"):
+        original_ref = body.source_ref.strip()
+        resolved = await resolve_ks_user_id(original_ref, cfg.engine.user_agent)
+        if not resolved:
+            raise HTTPException(
+                400, "无法解析快手创作者主页，请粘贴完整分享文案、"
+                     "创作者主页链接 / v.kuaishou.com 短链 / user_id")
+        body.source_ref = resolved
+        if not body.source_name or body.source_name == f"创作者 {original_ref}":
+            body.source_name = f"创作者 {resolved}"
+
+
 def _collection_keywords(values: list[str]) -> list[str]:
     out: list[str] = []
     seen: set[str] = set()
@@ -7386,6 +7407,7 @@ async def list_xhs_favorite_boards(account_id: int):
 
 @app.post("/api/collections")
 async def create_keyword_collection(body: KeywordCollectionIn, request: Request = None):
+    await _resolve_ks_creator_source(body)
     with get_session() as session:
         def create():
             platform, keywords, quality, download_dir, options = _validated_collection_input(body)
@@ -7419,6 +7441,7 @@ async def create_keyword_collection(body: KeywordCollectionIn, request: Request 
 @app.put("/api/collections/{job_id}")
 async def update_keyword_collection(job_id: int, body: KeywordCollectionIn):
     """修改已结束任务的配置；历史作品/评论保留，续跑时按任务去重。"""
+    await _resolve_ks_creator_source(body)
     platform, keywords, quality, download_dir, options = _validated_collection_input(body)
     with get_session() as session:
         job = session.get(KeywordCollectionJob, job_id)
