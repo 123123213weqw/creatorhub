@@ -254,6 +254,32 @@ def _select_tiktok_awemes(items: list, quality: str, first_scan: bool,
     return current + historical[:max(0, initial_backfill_count)]
 
 
+def _select_ks_awemes(items: list, quality: str, first_scan: bool,
+                      monitor_since: int, initial_backfill_count: int) -> list[Aweme]:
+    """快手作品按发布时间稳定排序，应用「订阅后新增 + 可选首次回填」策略。
+    与抖音 _select_douyin_awemes 同语义,只是改用 parse_ks_feed 归一。"""
+    parsed = []
+    seen = set()
+    for item in items:
+        aw = parse_ks_feed(item, quality)
+        if not aw or aw.aweme_id in seen:
+            continue
+        seen.add(aw.aweme_id)
+        parsed.append(aw)
+    parsed.sort(key=lambda aw: (aw.create_time, aw.aweme_id), reverse=True)
+    if not first_scan:
+        # create_time 缺失时宁可保留，避免平台字段小改后静默漏掉真正的新作品。
+        return [aw for aw in parsed
+                if not aw.create_time or aw.create_time >= monitor_since]
+    if initial_backfill_count < 0:
+        return parsed
+    current = [aw for aw in parsed
+               if aw.create_time and aw.create_time >= monitor_since]
+    historical = [aw for aw in parsed
+                  if aw.create_time and aw.create_time < monitor_since]
+    return current + historical[:max(0, initial_backfill_count)]
+
+
 def _tiktok_download_session(account, identity, default_user_agent: str) \
         -> tuple[str, dict[str, str]]:
     user_agent = str(
@@ -1785,10 +1811,16 @@ class MonitorEngine:
             known = set(s.exec(
                 select(ContentRecord.aweme_id)
                 .where(ContentRecord.target_id == target_id)).all())
+            known_create_times = list(s.exec(
+                select(ContentRecord.create_time)
+                .where(ContentRecord.target_id == target_id)).all())
             user_id = target.sec_uid
             base_dir = target.download_dir or get_setting(
                 "download_dir", self.cfg.engine.media_dir)
             quality = target.video_quality or get_setting("video_quality", "highest")
+            monitor_since = int(target.created_at.timestamp())
+            scan_since = _douyin_scan_since(monitor_since, known_create_times)
+            backfill_count = target.initial_backfill_count
             auto_download = target.download_enabled
             media_filter = target.media_filter or "all"
             strategy = _monitor_strategy(
@@ -1797,16 +1829,15 @@ class MonitorEngine:
         items, author, error = await fetch_ks_videos(
             self.browser, identity, user_id, known,
             max_scrolls=strategy["max_scrolls"],
-            block_media=self.cfg.engine.block_media_resources)
+            block_media=self.cfg.engine.block_media_resources,
+            # 默认只监控订阅后的作品；显式首次回填时允许继续向历史翻页。
+            stop_before=(0 if first_scan and backfill_count != 0 else scan_since))
 
+        selected = _select_ks_awemes(
+            items, quality, first_scan, scan_since, backfill_count)
         new_records = []
-        seen = set()
         filtered_count = 0
-        for item in items:
-            aw = parse_ks_feed(item, quality)
-            if not aw or aw.aweme_id in seen:
-                continue
-            seen.add(aw.aweme_id)
+        for aw in selected:
             if not _monitor_content_matches(aw, strategy):
                 filtered_count += 1
                 continue
@@ -1853,7 +1884,7 @@ class MonitorEngine:
                                for rec, aw, should_download in new_records
                                if should_download))
         return {"ok": not error, "new": len(new_records), "error": error,
-                "scanned": len(seen), "filtered": filtered_count}
+                "scanned": len(selected), "filtered": filtered_count}
 
     async def _scan_tiktok_target_locked(self, target_id: int) -> dict:
         with get_session() as s:

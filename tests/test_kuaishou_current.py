@@ -314,6 +314,34 @@ class KuaishouCommentTests(unittest.TestCase):
                          ["root-1", "reply-1"])
         self.assertEqual(parse_ks_comment(flattened[0])["text"], "评论")
 
+    def test_rest_v2_comments_under_data_are_parsed(self):
+        root = {"comment_id": "rest-1", "content": "评论", "author_name": "甲",
+                "timestamp": 1_700_000_000_000}
+        for container in (
+            {"data": {"rootCommentsV2": [root]}},
+            {"data": {"commentList": [root]}},
+            {"data": {"comments": [root]}},
+            {"rootCommentsV2": [root]},
+        ):
+            with self.subTest(container=list(container)):
+                self.assertEqual(_dig_comments(container), [root])
+
+    def test_comments_under_unknown_operation_name_fall_back_recursively(self):
+        root = {"commentId": "gql-1", "content": "评论", "authorName": "甲",
+                "timestamp": 1_700_000_000_000}
+        # 操作名/层级都改了,但评论数组仍挂在「comment 命名键」下,兜底也要能挖到。
+        payload = {
+            "data": {"commentListQueryV3": {"feeds": {"rootCommentsV2": [root]}}}
+        }
+        self.assertEqual(_dig_comments(payload), [root])
+
+    def test_comments_under_non_comment_key_detected_by_shape(self):
+        root = {"commentId": "shape-1", "content": "评论", "authorName": "甲",
+                "timestamp": 1_700_000_000_000}
+        # 键名里没有 comment(如 feeds/items),靠元素形状(commentId)兜底命中。
+        payload = {"data": {"visionCommentList": {"feeds": [root]}}}
+        self.assertEqual(_dig_comments(payload), [root])
+
 
 class KuaishouSearchTests(unittest.IsolatedAsyncioTestCase):
     async def test_rest_and_graphql_search_responses_are_deduplicated(self):
