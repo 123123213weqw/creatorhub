@@ -28,8 +28,8 @@ flowchart TD
 
 | 目录 | 用途 |
 |---|---|
-| `app/wecom_*.py`、`app/web/wecom*.js` | Hub 内的企微接入与朋友圈功能 |
-| `app/business_*.py`、`app/operations_*.py` | 复用 Hub 的业务状态与工作流 |
+| `huilima_plugin/wecom_*.py`、`huilima_plugin/web/` | 插件企微与扩展页面，app 旧路径保留兼容入口 |
+| `huilima_plugin/business_*.py`、`huilima_plugin/operations_*.py` | 复用 Hub 的业务状态与工作流 |
 | `clients/creatorhub-cli/` | CLI 0.12 与默认受限 JSONL 入口 |
 | `integrations/feishu-bot/` | 白名单私聊、模型、工具路由和确认器 |
 | `tests/test_wecom_*.py` | 合成/隔离企微与朋友圈测试 |
@@ -56,3 +56,8 @@ python -m pytest -q tests/test_wecom_readonly.py tests/test_wecom_customer_reado
 ```
 
 测试数据均为合成数据；CI 不应配置真实平台密钥或发布素材。源码上传不代表部署升级，不会自动修改运行中的 Hub、V100 或飞书应用配置。
+
+
+## 插件拆分进度
+
+独立包 0.1.0 第一阶段：实现模块、页面片段、资源与注册/生命周期已移出宿主；仍保留模型、发布、调度等必要安全适配，不是上游零改动插件。详见 [插件边界与后续收敛](../huilima_plugin/README.md)。现有 main 同步任务与运行中服务未改变。

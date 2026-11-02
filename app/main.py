@@ -609,9 +609,7 @@ async def lifespan(app: FastAPI):
     pruned_risk_events = engine._prune_risk_events_if_due(startup_now)
     if pruned_risk_events:
         print(f"[startup] 已清理 {pruned_risk_events} 条过期风控事件")
-    from . import video_backup, delivery_workflows, operations_health, wecom_moments
-    recovered = (engine.recover_interrupted_tasks() + sync_requests.recover() + video_backup.recover()
-                 + delivery_workflows.recover() + wecom_moments.recover())
+    recovered = engine.recover_interrupted_tasks() + _huilima_plugin.recover()
     if recovered:
         print(f"[startup] 已恢复 {recovered} 条中断的写任务")
     engine.start()
@@ -630,10 +628,9 @@ async def lifespan(app: FastAPI):
                 print(f"[webhook] 事件投递循环异常: {exc!r}")
             await asyncio.sleep(15)
     _webhook_delivery_task = asyncio.create_task(webhook_delivery_loop())
-    operations_health_task = asyncio.create_task(operations_health.monitor_loop())
+    plugin_tasks = _huilima_plugin.start_tasks()
     yield
-    operations_health_task.cancel()
-    await asyncio.gather(operations_health_task, return_exceptions=True)
+    await _huilima_plugin.stop_tasks(plugin_tasks)
     if _webhook_delivery_task:
         _webhook_delivery_task.cancel()
         await asyncio.gather(_webhook_delivery_task, return_exceptions=True)
@@ -653,31 +650,9 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="CreatorHub", lifespan=lifespan)
-from .business_workflows import TeamBoundaryMiddleware
-app.add_middleware(TeamBoundaryMiddleware)
+from huilima_plugin.bootstrap import install as install_huilima
+_huilima_plugin = install_huilima(app)
 app.add_middleware(LocalAccessMiddleware)
-from .operations_workflows import router as operations_workflows_router
-app.include_router(operations_workflows_router)
-from .video_backup import router as video_backup_router
-app.include_router(video_backup_router)
-from .business_workflows import router as business_router
-from .delivery_workflows import router as delivery_router
-from .operations_health import router as operations_health_router
-app.include_router(business_router)
-app.include_router(delivery_router)
-app.include_router(operations_health_router)
-from .wecom_workflows import router as wecom_workflows_router
-app.include_router(wecom_workflows_router)
-from .crm_preflight import router as crm_preflight_router
-from .observations import router as observations_router
-app.include_router(crm_preflight_router)
-app.include_router(observations_router)
-from .wecom_business_workflows import router as wecom_business_router
-app.include_router(wecom_business_router)
-from .delivery_profile import router as delivery_profile_router
-app.include_router(delivery_profile_router)
-from .wecom_moments import router as wecom_moments_router
-app.include_router(wecom_moments_router)
 WEB_DIR = Path(__file__).parent / "web"
 
 
@@ -11862,13 +11837,13 @@ async def test_channel(cid: int):
 # ─────────── 前端 ───────────
 @app.get("/", response_class=HTMLResponse)
 async def index():
-    html = (WEB_DIR / "index.html").read_text(encoding="utf-8")
+    html = _huilima_plugin.render_page((WEB_DIR / "index.html").read_text(encoding="utf-8"))
     if os.environ.get("CREATORHUB_DESKTOP") == "1":
         html = html.replace('data-guide-base="https://3441293738.github.io/creatorhub/guide/"',
                             'data-guide-base="/guide/"')
     # Version all local UI assets, including pre-paint appearance boot and CSS.
     try:
-        for asset in ("app.js", "submissions.js", "appearance.js", "appearance.css", "workspace-ui.js", "workbench.js", "workbench.css", "wecom.js", "wecom-moments.js", "integrations-v9.js", "operations.js"):
+        for asset in ("app.js", "submissions.js", "appearance.js", "appearance.css", "workspace-ui.js", "workbench.js", "workbench.css"):
             ver = int((WEB_DIR / asset).stat().st_mtime)
             html = html.replace(f"/static/{asset}", f"/static/{asset}?v={ver}")
     except Exception:
@@ -11884,15 +11859,4 @@ app.mount("/static", StaticFiles(directory=str(WEB_DIR)), name="static")
 
 @app.get("/health")
 async def health():
-    from .delivery_workflows import config as delivery_config
-    with get_session() as session:
-        crm_mode=delivery_config(session).mode
-    return {"status": "ok", "hub_cli_protocol": "1.0",
-            "draft_review": True, "controlled_sync_queue": True,
-            "local_assets": True, "offline_leads": True, "crm_mode": crm_mode,
-            "video_backup_protocol": "1.0", "business_operations_protocol": "1.0",
-            "team_gateway_enabled": False, "automatic_external_delivery": False,
-            "wecom_readonly_protocol": "1.0", "wecom_automatic_polling": False,
-            "business_integrations_protocol":"1.0","typed_crm_fields":True,"backup_policy_plan_only":True,
-            "wecom_moments_protocol":"1.0","wecom_moments_automatic_submit":False,
-            "wecom_moments_manual_approval":True}
+    return {"status": "ok", **_huilima_plugin.health()}

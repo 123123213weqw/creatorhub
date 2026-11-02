@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=65"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "huilima-creatorhub-plugin"
+version = "0.1.0"
+readme = "README.md"
+description = "Versioned WeCom, CRM, backup and UI extension for an existing CreatorHub host"
+requires-python = ">=3.11"
+# Core dependencies are supplied by the host. This stage still requires its
+# reviewed adapter/safety patches; it is not a pristine-upstream drop-in yet.
+dependencies = []
+
+[project.entry-points."creatorhub.plugins"]
+huilima = "huilima_plugin.bootstrap:install"
+
+[tool.setuptools]
+packages = ["huilima_plugin"]
+package-dir = {huilima_plugin = "."}
+include-package-data = true
+
+[tool.setuptools.package-data]
+huilima_plugin = ["web/*.js", "web/*.html", "plugin.json"]

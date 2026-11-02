@@ -1,7 +1,7 @@
 /* Offline UI-state tests. No browser or real network. */
 const test=require('node:test'), assert=require('node:assert/strict');
 const vm=require('node:vm'), fs=require('node:fs'), path=require('node:path');
-const source=fs.readFileSync(path.join(__dirname,'../app/web/wecom.js'),'utf8');
+const source=fs.readFileSync(path.join(__dirname,'../huilima_plugin/web/wecom.js'),'utf8');
 function fixture({token='',preview=false,key='',confirm=true,api=async()=>({})}={}){
   const calls=[],store=new Map(key?[['creatorhub-wecom-pending-request',key]]:[]);
   const elements={'wecom-summary':{textContent:''},'wecom-refresh-button':{disabled:false}};

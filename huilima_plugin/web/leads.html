@@ -1,0 +1,10 @@
+<div data-hubpanel="leads" style="display:none">
+        <div class="hint">只读本机已同步评论，用可解释规则提取咨询候选，不访问抖音、不发送评论/私信、不把评论原文或联系方式交给云端模型。命中不代表已核实客户；先人工复核，再演练本机 CRM。客户表尚未配置，真实飞书写入和负责人通知不会发生。</div>
+        <div class="row" style="gap:10px;flex-wrap:wrap;margin:12px 0">
+          <label for="lead-work-id">本账号作品编号</label><input id="lead-work-id" type="number" min="1" style="max-width:140px" placeholder="Hub作品ID">
+          <button onclick="proposeCachedLeads()">分析缓存评论</button>
+          <button class="ghost" onclick="refreshLeadCandidates()">刷新候选</button>
+        </div>
+        <div id="lead-status" role="status"></div>
+        <div class="table-wrap"><table aria-label="意向候选列表"><thead><tr><th>编号 / 作品</th><th>信号</th><th>状态</th><th>负责人标签</th><th>操作</th></tr></thead><tbody id="lead-table"></tbody></table></div>
+      </div>

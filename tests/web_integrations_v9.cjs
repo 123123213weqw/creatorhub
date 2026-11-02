@@ -1,5 +1,5 @@
 const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
-const source=fs.readFileSync('app/web/integrations-v9.js','utf8');
+const source=fs.readFileSync('huilima_plugin/web/integrations-v9.js','utf8');
 function fixture(){
  const calls=[],data=new Map(),element={textContent:''};let accepted=false,fail=false,sequence=0,form;
  const c={document:{documentElement:{dataset:{}},getElementById:()=>element},OPS_TOKEN:'',window:{},

@@ -1,0 +1,16 @@
+<div data-hubpanel="assets" style="display:none">
+        <div class="hint">素材由本机 CLI 显式登记，机器人只使用素材编号，不接触任意本机路径。原文件修改不改变已登记副本。演示素材生成的草稿禁止真实发布。</div>
+        <button class="ghost" onclick="refreshLocalAssets()">刷新已登记素材</button>
+        <div id="local-asset-list" style="margin-top:12px"></div>
+        <section class="card" style="padding:14px;margin-top:18px" aria-label="视频备份与恢复">
+          <h3>视频备份与恢复</h3>
+          <div class="hint">按需求保留主用与备份存储接口。备份采用不可变版本和 SHA256 校验，不跟随源文件删除；恢复只写新隔离目录，不覆盖原素材。目标、保留周期及 RPO/RTO 尚待确认，同盘演练不等于独立备份。</div>
+          <div id="video-backup-status" role="status">正在读取备份状态…</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0">
+            <button class="ghost" onclick="refreshVideoBackups()">刷新备份状态</button>
+            <button class="ghost" onclick="configureVideoBackup()">配置存储接口</button>
+            <button id="video-backup-create" onclick="submitVideoBackup('snapshot')" disabled>创建视频备份版本</button>
+          </div>
+          <div id="video-backup-history"></div>
+        </section>
+      </div>

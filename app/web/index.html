@@ -3541,9 +3541,9 @@
         <button class="tab notsh-only tk-hide" data-hubtab="following" onclick="switchHubTab('following')"><svg><use href="#i-user"/></svg>关注 <span class="tab-badge" id="hb-following">0</span></button>
         <button class="tab notsh-only tk-hide" data-hubtab="fans" onclick="switchHubTab('fans')"><svg><use href="#i-heart"/></svg>粉丝 <span class="tab-badge" id="hb-fans">0</span></button>
         <button class="tab notsh-only tk-hide" data-hubtab="dm" onclick="switchHubTab('dm')"><svg><use href="#i-send"/></svg>私信 <span class="tab-badge" id="hb-dm">0</span></button>
-        <button class="tab dy-only" data-hubtab="leads" onclick="switchHubTab('leads')">意向候选</button>
-        <button class="tab dy-only" data-hubtab="assets" onclick="switchHubTab('assets')">本地素材</button>
-        <button class="tab" data-hubtab="operations" onclick="switchHubTab('operations')">业务协作</button>
+        <!-- HUILIMA:navigation -->
+
+
         <button class="tab" data-hubtab="stats" onclick="switchHubTab('stats')"><svg><use href="#i-eye"/></svg>数据 <span class="tab-badge" id="hb-stats">0</span></button>
       </div>
 
@@ -3629,82 +3629,10 @@
         </div>
       </div>
 
-      <div data-hubpanel="leads" style="display:none">
-        <div class="hint">只读本机已同步评论，用可解释规则提取咨询候选，不访问抖音、不发送评论/私信、不把评论原文或联系方式交给云端模型。命中不代表已核实客户；先人工复核，再演练本机 CRM。客户表尚未配置，真实飞书写入和负责人通知不会发生。</div>
-        <div class="row" style="gap:10px;flex-wrap:wrap;margin:12px 0">
-          <label for="lead-work-id">本账号作品编号</label><input id="lead-work-id" type="number" min="1" style="max-width:140px" placeholder="Hub作品ID">
-          <button onclick="proposeCachedLeads()">分析缓存评论</button>
-          <button class="ghost" onclick="refreshLeadCandidates()">刷新候选</button>
-        </div>
-        <div id="lead-status" role="status"></div>
-        <div class="table-wrap"><table aria-label="意向候选列表"><thead><tr><th>编号 / 作品</th><th>信号</th><th>状态</th><th>负责人标签</th><th>操作</th></tr></thead><tbody id="lead-table"></tbody></table></div>
-      </div>
-      <div data-hubpanel="assets" style="display:none">
-        <div class="hint">素材由本机 CLI 显式登记，机器人只使用素材编号，不接触任意本机路径。原文件修改不改变已登记副本。演示素材生成的草稿禁止真实发布。</div>
-        <button class="ghost" onclick="refreshLocalAssets()">刷新已登记素材</button>
-        <div id="local-asset-list" style="margin-top:12px"></div>
-        <section class="card" style="padding:14px;margin-top:18px" aria-label="视频备份与恢复">
-          <h3>视频备份与恢复</h3>
-          <div class="hint">按需求保留主用与备份存储接口。备份采用不可变版本和 SHA256 校验，不跟随源文件删除；恢复只写新隔离目录，不覆盖原素材。目标、保留周期及 RPO/RTO 尚待确认，同盘演练不等于独立备份。</div>
-          <div id="video-backup-status" role="status">正在读取备份状态…</div>
-          <div style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0">
-            <button class="ghost" onclick="refreshVideoBackups()">刷新备份状态</button>
-            <button class="ghost" onclick="configureVideoBackup()">配置存储接口</button>
-            <button id="video-backup-create" onclick="submitVideoBackup('snapshot')" disabled>创建视频备份版本</button>
-          </div>
-          <div id="video-backup-history"></div>
-        </section>
-      </div>
+      <!-- HUILIMA:leads -->
+      <!-- HUILIMA:assets -->
 
-      <div data-hubpanel="operations" style="display:none">
-        <h3>业务协作 · 沿用当前 Hub</h3>
-        <p class="hint">内容版本 → 账号草稿 / 员工目标 → 截图核验 → 分开入表与通知。默认不外发、不授权、不发布。远程员工入口未启用；员工手机验收是否纳入，以交付范围配置为准。</p>
-        <p id="operations-status" role="status"></p>
-        <button class="ghost" onclick="refreshOperations()">刷新业务状态</button>
-        <button class="ghost" onclick="opsSetToken()">使用团队凭据 / 返回本机管理员</button>
-        <p id="ops-readiness" class="hint"></p>
-        <details ontoggle="if(this.open)wecomLoadStatus()"><summary>企微企业只读摘要 · 本机管理员</summary>
-          <p class="hint">这是企微企业级摘要，不随上方平台账号切换。只保存单一测试成员的客户数量，不保存客户ID、详情或聊天。查看缓存不访问企微；手动刷新至少间隔15分钟，无后台轮询。失败和旧数据时间分别显示，不把未知当成零。</p>
-          <button class="ghost" type="button" onclick="wecomLoadStatus()">查看缓存 / 原请求回执</button>
-          <button class="ghost" type="button" id="wecom-refresh-button" onclick="wecomRefreshCounts()">确认后手动刷新企微数量</button>
-          <pre id="wecom-summary" role="status" style="white-space:pre-wrap;overflow-wrap:anywhere">尚未读取企微摘要。</pre>
-        </details>
-        <div id="ops-admin-actions"><button class="ghost" onclick="opsActor()">登记人员角色</button> <button class="ghost" onclick="opsCredential()">人工授权24小时</button> <button class="ghost" onclick="opsDisableActor()">停用 / 吊销</button> <button class="ghost" onclick="opsDeliveryConfig()">CRM / 通知接口配置</button></div>
-        <details ontoggle="if(this.open)v9LoadHandoff()"><summary>业务接入验收 · 离线数据 / CRM / 企微记录</summary>
-          <p class="hint">接口已实现不等于真实业务已验收。查看交付状态不访问外部平台；指标未知保持未知。企微仅查看单一测试成员的历史执行摘要，不取聊天或客户详情，不创建或发送任务。</p>
-          <div class="row" style="gap:8px;flex-wrap:wrap">
-            <button class="ghost" type="button" onclick="v9LoadHandoff()">查看交付缺口</button>
-            <button class="ghost" type="button" onclick="v9Profile()">交付与备份目标配置</button>
-            <button class="ghost" type="button" onclick="v9CRMPreflight()">只读检查客户表字段</button>
-            <button class="ghost" type="button" onclick="v9BusinessStatus()">查看企微业务缓存</button>
-            <button class="ghost" type="button" onclick="v9BusinessRefresh()">确认后核验近7天企微记录</button>
-            <button class="ghost" type="button" onclick="v9ObservationImport()">导入已授权指标 / 评论</button>
-            <button class="ghost" type="button" onclick="v9Observations()">查看离线数据摘要</button>
-            <button class="ghost" type="button" onclick="v10BackupPolicy()">备份周期 / 保留计划（不执行）</button>
-          </div>
-          <pre id="v9-summary" role="status" style="white-space:pre-wrap;overflow-wrap:anywhere">尚未读取交付状态。</pre>
-        </details>
-        <details id="wcm-panel" ontoggle="if(this.open)wcmLoad()">
-          <summary>企微客户朋友圈 · 人工审核创建</summary>
-          <p class="hint">沿用当前 Hub。先建本地草稿，再由本机管理员审核并单次提交；创建任务不等于已发表，成员仍须在企微确认。必须指定唯一成员和企业客户标签，不默认全体客户。支持纯文字、最多9张JPG/PNG或一个≤10MB且≤30秒的MP4；不自动上传、重试或轮询，不采集普通群聊天。</p>
-          <div class="row" style="gap:8px;flex-wrap:wrap">
-            <button class="ghost" type="button" onclick="wcmLoad()">查看本地草稿 / 状态</button>
-            <button class="ghost" type="button" onclick="wcmPreflight()">手动核对唯一成员</button>
-            <button type="button" onclick="wcmDraft()">新建本地朋友圈草稿</button>
-            <button class="ghost" type="button" onclick="wcmReceipt()">核对原请求回执</button>
-          </div>
-          <p id="wcm-status" role="status">尚未读取；展开仅查看本地缓存。</p>
-          <div id="wcm-list"></div>
-        </details>
-        <div id="ops-once-token" class="hint" hidden style="overflow-wrap:anywhere" role="status"></div>
-        <div id="ops-content-actions" style="display:flex;gap:8px;flex-wrap:wrap;margin:16px 0"><button onclick="opsContent()">新建内容版本</button><button class="ghost" onclick="opsNewVersion()">追加不可变版本</button><button class="ghost" onclick="opsPersona()">账号人设</button><button class="ghost" onclick="opsPlan()">新建草稿批次</button><button class="ghost" onclick="opsManual()">人工发布回填</button><button class="ghost" onclick="opsEnqueueCRM()">已复核线索入表队列</button></div>
-        <details open><summary>内容与账号变体</summary><div id="ops-contents"></div></details>
-        <details><summary>草稿批次（仍需原发布页人工确认）</summary><div id="ops-plans"></div></details>
-        <details open><summary>员工任务与私有凭证</summary><div id="ops-distribution"></div></details>
-        <details><summary>人工发布回填与复核</summary><div id="ops-manual"></div></details>
-        <details><summary>CRM入表 / 通知补偿</summary><div id="ops-delivery"></div></details>
-        <details><summary>本机健康、去重事件与目标汇总</summary><pre id="ops-health" style="white-space:pre-wrap;overflow-wrap:anywhere"></pre><pre id="ops-report" style="white-space:pre-wrap;overflow-wrap:anywhere"></pre></details>
-      </div>
+      <!-- HUILIMA:operations -->
       <div data-hubpanel="stats" style="display:none">
         <div style="display:flex;gap:12px;align-items:flex-start;margin-bottom:12px">
           <div class="hint" style="margin:0;flex:1">本账号数据趋势(粉丝 / 作品互动)由后台引擎在账号体检时逐日快照;单篇明细来自「我的作品」。作品健康监控(持续0播/违规告警)可在 <code>config.yaml</code> 打开 <code>engine.work_health_enabled</code>。趋势需运行若干天才有多点。</div>
@@ -3875,12 +3803,12 @@
 <script src="/static/submissions.js"></script>
 <script src="/static/engine-settings.js"></script>
 <dialog id="ops-dialog" style="width:min(94vw,720px);max-height:90vh;overflow:auto"><h3 id="ops-title"></h3><form id="ops-form" style="display:grid;gap:10px"></form><p id="ops-error" role="alert" style="color:var(--red)"></p><div style="display:flex;gap:10px"><button type="submit" form="ops-form" id="ops-save">确认操作</button><button type="button" class="ghost" onclick="document.getElementById('ops-dialog').close()">取消</button></div></dialog>
-<script src="/static/operations.js"></script>
+<!-- HUILIMA:scripts-before -->
 <script src="/static/app.js"></script>
-<script src="/static/wecom.js"></script>
+<!-- HUILIMA:scripts-after -->
 <dialog id="wcm-dialog" aria-labelledby="wcm-title" style="width:min(94vw,760px);max-height:90vh;overflow:auto"><h3 id="wcm-title"></h3><div id="wcm-preview" style="white-space:pre-wrap;overflow-wrap:anywhere"></div><form id="wcm-form" style="display:grid;gap:10px"></form><p id="wcm-error" role="alert" style="color:var(--red)"></p><div style="display:flex;gap:10px"><button type="submit" form="wcm-form" id="wcm-save">确认</button><button type="button" class="ghost" onclick="document.getElementById('wcm-dialog').close()">关闭 / 取消</button></div></dialog>
-<script src="/static/wecom-moments.js"></script>
-<script src="/static/integrations-v9.js"></script>
+
+
 <script src="/static/workspace-ui.js"></script>
 <script src="/static/workbench.js"></script>
 </body>

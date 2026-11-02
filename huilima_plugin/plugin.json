@@ -1,0 +1,17 @@
+{
+  "id": "huilima",
+  "version": "0.1.0",
+  "entrypoint": "huilima_plugin.bootstrap:install",
+  "host_adapter": "staged-v1",
+  "migration_stage": "modules-and-ui-extracted",
+  "core_patch_free": false,
+  "database_authority": "existing_creatorhub",
+  "automatic_external_writes": false,
+  "automatic_schema_migration": false,
+  "required_host_patches": [
+    "reviewed publish task fields and immutable media validation",
+    "low-frequency sync queue dispatch hooks",
+    "local assets/lead/backup host model definitions",
+    "single UI rendering and panel-refresh slot hooks"
+  ]
+}

@@ -1,6 +1,6 @@
 /* Offline DOM tests, no real browser, platform, credentials or timer. */
 const test=require('node:test'), assert=require('node:assert/strict'), vm=require('node:vm'), fs=require('node:fs'), path=require('node:path');
-const source=fs.readFileSync(path.join(__dirname,'../app/web/wecom-moments.js'),'utf8');
+const source=fs.readFileSync(path.join(__dirname,'../huilima_plugin/web/wecom-moments.js'),'utf8');
 function fixture({token='',preview=false,handler=async()=>({items:[]})}={}){
  const calls=[],store=new Map(),nodes={};
  class Node{

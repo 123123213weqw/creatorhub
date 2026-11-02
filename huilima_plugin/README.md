@@ -1,0 +1,38 @@
+# Huilima 插件 0.1.0 · 第一阶段拆分
+
+企微、CRM、视频备份、协作工作流及扩展页面的实现已从 `app/` 独立到本 Python 包，拥有独立版本和标准插件入口。**当前仍需要已审核的宿主适配/发布安全补丁，尚不是原版 CreatorHub 零修改即插即用插件。** `plugin.json` 和运行期 manifest 会明确返回 `core_patch_free=false`。
+
+## 已拆出的边界
+
+- 23 个实现模块迁入插件，宿主导入集中到 `hub_adapter.py` 的显式符号契约。
+- `app/wecom_*.py` 等旧路径只保留同一模块对象的兼容入口，避免破坏已有 CLI/API、monkeypatch 或重复注册 SQLModel 表。
+- 5 个脚本、6 个页面片段归插件所有；宿主保留页面插槽、通用面板刷新与一次注册入口。页面仍在原 Hub，受原本机/团队访问边界约束，不新增第二个中控台。
+- API、静态资源注册、启动恢复及维护任务统一由 `bootstrap.py` 管理。注册幂等；停止时只取消插件持有的任务。
+- `/api/plugins/huilima/manifest` 报告版本与边界。缺少必需审核字段时拒绝加载，不隐式回退到无审核发布。
+
+## 数据与安全不变
+
+复用原 Hub 数据库、会话、业务回执和账户引用，没有复制账号/Cookie、改表名或新建业务库。模型类仅更换 Python 模块归属，旧导入仍引用同一个类。模型由宿主现有初始化流程注册，本阶段不新增插件迁移器；**本轮拆分未对运行中的数据库做迁移**。
+
+不增加真实企业权限，不执行真实发布/派发，不自动刷新或上传，不绕过审核、演示标记、版本摘要、素材完整性、节流、一次提交和未知结果核对。插件不是 Python 安全沙箱，只由管理员显式安装可信包；不自动搜索或执行任意第三方 entry point。
+
+## 安装与验证
+
+需要 Python 3.11+ 与具有 `staged-v1` 适配契约的 CreatorHub，依赖复用宿主 requirements。
+
+```sh
+python -m pip install --no-deps ./huilima_plugin
+# 只打包，不安装到运行中的 venv
+python -m pip wheel --no-build-isolation --no-deps ./huilima_plugin -w ./dist
+python -m pytest -q tests/test_huilima_plugin.py
+```
+
+标准入口：`creatorhub.plugins / huilima = huilima_plugin.bootstrap:install`。当前宿主显式调用入口，**不是上游已提供的插件接口**。
+
+## 与上游同步的关系
+
+现有 `main` 的同步 CI 不变。本分支新增只读插件组合 CI，检查宿主适配、企微/CRM/备份、CLI、模型确认及包资源；不使用真实平台密钥，不合并分支、不推送源码、不部署服务。
+
+下一阶段继续收敛：`app/models.py` 中的既有扩展字段、发布草稿/审批服务、调度器同步挂钩、宿主 HTML/JS 最小插槽。发布可见性、演示禁止发布等安全补丁不能为“零冲突”删除。
+
+纯上游镜像继续同步，“宿主＋插件组合”通过测试后再升级，应分成两条线；**双轨自动组合尚未启用**。升级部署仍需单独备份确认，本阶段分支不能直接替换生产服务。

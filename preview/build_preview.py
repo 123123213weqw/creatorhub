@@ -63,6 +63,10 @@ def build(destination: Path) -> None:
     destination.mkdir(parents=True)
 
     html = (SOURCE / "index.html").read_text(encoding="utf-8")
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    from huilima_plugin.web_resources import render_page, asset_path, ASSETS
+    html = render_page(html)
     html = html.replace('data-guide-base="https://3441293738.github.io/creatorhub/guide/"',
                         'data-guide-base="./guide/" data-preview="true"')
     # The static demo does not create real tasks or durable submission receipts.
@@ -74,9 +78,9 @@ def build(destination: Path) -> None:
     (destination / "index.html").write_text(html.replace(marker, replacement), encoding="utf-8")
     # Early theme boot, shared tokens and shell interactions also work on Pages.
     html = (destination / "index.html").read_text(encoding="utf-8")
-    for asset in ("operations.js", "wecom.js", "wecom-moments.js", "integrations-v9.js", "appearance.js", "appearance.css", "engine-settings.js", "workspace-ui.js", "workbench.js", "workbench.css", "workbench.js.LEGAL.txt", "workbench-licenses.txt"):
+    for asset in (*ASSETS, "appearance.js", "appearance.css", "engine-settings.js", "workspace-ui.js", "workbench.js", "workbench.css", "workbench.js.LEGAL.txt", "workbench-licenses.txt"):
         html = html.replace(f"/static/{asset}", f"./{asset}")
-        shutil.copy2(SOURCE / asset, destination / asset)
+        shutil.copy2(asset_path(asset) if asset in ASSETS else SOURCE / asset, destination / asset)
     (destination / "index.html").write_text(html, encoding="utf-8")
     shutil.copy2(SOURCE / "app.js", destination / "app.js")
     shutil.copy2(PREVIEW / "demo-api.js", destination / "demo-api.js")
