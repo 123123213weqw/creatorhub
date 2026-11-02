@@ -1817,6 +1817,7 @@
     <button role="tab" data-pf="kuaishou" onclick="switchPlatform('kuaishou')">快手</button>
     <button role="tab" data-pf="shipinhao" onclick="switchPlatform('shipinhao')">视频号</button>
     <button role="tab" data-pf="tiktok" onclick="switchPlatform('tiktok')">TikTok</button>
+    <!-- HUILIMA:platform-navigation -->
   </div>
   <div class="header-actions">
     <button class="ghost command-trigger" id="command-trigger" type="button" aria-label="搜索功能" aria-haspopup="dialog" aria-controls="command-dialog" aria-keyshortcuts="Control+k Meta+k" title="搜索功能（Ctrl / ⌘ K）"><svg aria-hidden="true"><use href="#i-logo"/></svg><span>搜索功能</span><kbd>Ctrl K</kbd></button>
@@ -3529,7 +3530,7 @@
   <!-- ───────── 账号管理(独立面板:本账号的作品/关注/粉丝/私信,数据按所选账号隔离) ───────── -->
   <section data-panel="hub">
     <!-- HUILIMA:workspace -->
-    <div class="card" id="huilima-platform-workspace" role="tabpanel" aria-labelledby="huilima-platform-tab">
+    <div class="card">
       <div class="card-head">
         <span class="card-ic"><svg><use href="#i-user"/></svg></span>
         <h2>本账号管理 <span class="sub">本账号的作品、数据与已支持的关系功能</span></h2>
@@ -3644,8 +3645,8 @@
         <div class="table-wrap"><table aria-label="账号作品数据"><thead><tr><th>作品</th><th>播放</th><th>点赞</th><th>评论</th><th>状态</th></tr></thead><tbody id="stats-works"></tbody></table></div>
       </div>
     </div>
-    <!-- HUILIMA:moments -->
   </section>
+  <!-- HUILIMA:moments -->
 </main>
 </div>
 

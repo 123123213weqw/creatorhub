@@ -1098,6 +1098,7 @@ function updatePageContext(name = CURRENT_TAB) {
   if ($("page-platform")) $("page-platform").textContent = extensionContext?.platform || PF_NAME[PLATFORM] || "当前平台";
   if ($("page-kicker")) $("page-kicker").textContent = extensionContext?.kicker || (pfIsChannels(PLATFORM) ? "本账号工作台" : "多平台工作台");
   document.title = `${meta.title} · ${extensionContext?.platform || PF_NAME[PLATFORM] || ""} | CreatorHub`;
+  globalThis.HuilimaPluginUI?.pageChanged?.(name, PLATFORM);
   globalThis.CreatorHubWorkbench?.navigate?.();
 }
 // 是否支持「发布」面板(四平台均有)
@@ -1105,6 +1106,7 @@ function pfHasPublish(pf) { return pf === "xhs" || pf === "kuaishou" || pf === "
 // 视频号只有「本账号」数据(助手接口本账号),不支持监控他人作品/评论
 function pfIsChannels(pf) { return pf === "shipinhao"; }
 function switchPlatform(pf) {
+  const leavingExtensionPage = !!globalThis.HuilimaPluginUI?.pageMeta?.(CURRENT_TAB);
   if (!["douyin", "xhs", "kuaishou", "shipinhao", "tiktok"].includes(pf)) pf = "douyin";
   globalThis.CreatorHubWorkbench?.platformChanging?.(pf);
   PLATFORM = pf;
@@ -1132,6 +1134,7 @@ function switchPlatform(pf) {
   });
   try { localStorage.setItem("dym-pf", pf); } catch (e) {}
   applyPlatformUI();
+  if (leavingExtensionPage) switchTab("hub", true);
   ["t-interval", "w-interval", "d-w-interval"].forEach(id => $(id)?._monitorIntervalSync?.());
   // 切换后立刻刷新该平台数据
   refreshAccounts(); refreshMonitors(); refreshContents(); refreshWatches(); refreshComments(); refreshDanmakuWatches(); refreshDanmaku(); refreshCollections();
@@ -1438,7 +1441,7 @@ function applyMonitorForm() {
 
 // ─── 标签页切换 ───
 function switchTab(name, pushHistory = false) {
-  if (!PAGE_META[name]) name = "overview";
+  if (!PAGE_META[name] && !globalThis.HuilimaPluginUI?.pageMeta?.(name)) name = "overview";
   globalThis.CreatorHubWorkbench?.beforeNavigate?.();
   const changed = CURRENT_TAB !== name;
   CURRENT_TAB = name;
@@ -1473,6 +1476,7 @@ function switchTab(name, pushHistory = false) {
     const title = $("page-title");
     if (title && (!activePanel || !activePanel.contains(document.activeElement))) title.focus({ preventScroll: true });
   });
+  globalThis.HuilimaPluginUI?.refreshPage?.(name);
   if (name === "hub") { refreshHubSummary(); refreshHubPanel(); }
   else stopDmStream();   // 离开本账号管理即断开私信实时流
   if (name === "share-download") {
@@ -3116,8 +3120,6 @@ function switchHubTab(name) {
   try { localStorage.setItem("dym-hubtab", name); } catch (e) {}
   document.querySelectorAll("[data-hubpanel]").forEach(p => { p.style.display = p.dataset.hubpanel === name ? "" : "none"; });
   document.querySelectorAll("[data-hubtab]").forEach(t => t.classList.toggle("active", t.dataset.hubtab === name));
-  globalThis.HuilimaPluginUI?.activateHubPanel?.(name);
-  if (CURRENT_TAB === "hub") updatePageContext();
   if (name === "dm") startDmStream(); else stopDmStream();
   refreshHubPanel();
 }
@@ -8561,7 +8563,7 @@ async function loop() {
     hub: [refreshHubSummary],
   };
   const jobs = editing ? [] : (refreshers[tab] || []);
-  if (tab !== "queue") jobs.push(refreshTaskQueueBadge);
+  if (tab !== "queue" && !globalThis.HuilimaPluginUI?.pageMeta?.(tab)) jobs.push(refreshTaskQueueBadge);
   try {
     const results = await Promise.allSettled(jobs.map(fn => Promise.resolve().then(() => fn())));
     const failed = _apiFailures > failuresBefore || results.some(result => result.status === "rejected");
@@ -8591,14 +8593,18 @@ $("collection-content-list").innerHTML = collectionResultSkeleton(4);
 $("queue-table").innerHTML = skeleton(7);
 
 // restore last-selected section (default: 总览);旧版四个独立页已并入「账号管理」
-const VALID_TABS = ["overview", "accounts", "risk-control", "queue", "collections", "monitors", "comments", "danmaku", "hub", "tiktok-tools", "publish", "autocomment", "share-download", "notifications", "settings"];
+const VALID_TABS = ["overview", "accounts", "risk-control", "queue", "collections", "monitors", "comments", "danmaku", "hub", "tiktok-tools", "publish", "autocomment", "share-download", "notifications", "settings", ...(globalThis.HuilimaPluginUI?.pageNames || [])];
 const LEGACY_HUB_TABS = ["myworks", "following", "fans", "dm"];
+const LEGACY_PLUGIN_HUB_TAB = globalThis.HuilimaPluginUI?.migrateLegacyHubPanel?.(HUB_TAB);
+if (LEGACY_PLUGIN_HUB_TAB) HUB_TAB = LEGACY_PLUGIN_HUB_TAB.hubPanel;
 switchTab((() => {
   try {
     const hashTab = decodeURIComponent(location.hash.replace(/^#/, ""));
+    if (hashTab === "hub" && LEGACY_PLUGIN_HUB_TAB) return LEGACY_PLUGIN_HUB_TAB.page;
     if (VALID_TABS.includes(hashTab)) return hashTab;
     const t = localStorage.getItem("dym-tab");
     if (LEGACY_HUB_TABS.includes(t)) { HUB_TAB = t; return "hub"; }
+    if (t === "hub" && LEGACY_PLUGIN_HUB_TAB) return LEGACY_PLUGIN_HUB_TAB.page;
     return VALID_TABS.includes(t) ? t : "overview";
   } catch (e) { return "overview"; }
 })());
@@ -8643,7 +8649,7 @@ document.querySelector(".pswitch").addEventListener("keydown", e => {
   else if (e.key === "End") index = buttons.length - 1;
   else index = (index + (e.key === "ArrowRight" ? 1 : -1) + buttons.length) % buttons.length;
   buttons[index].focus();
-  switchPlatform(buttons[index].dataset.pf);
+  buttons[index].click();
 });
 let _backTopTick = false;
 window.addEventListener("scroll", () => {

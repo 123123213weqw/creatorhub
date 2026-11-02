@@ -135,17 +135,23 @@ def test_moments_workspace_not_nested_in_account_or_operations():
  parser=Structure();parser.feed(render_page((ROOT/'app/web/index.html').read_text()))
  assert len(parser.ids)==len(set(parser.ids))
  ancestors=parser.parents['wcm-panel']
- assert any(a.get('data-hubpanel')=='moments' for _,a in ancestors)
+ assert any(a.get('data-panel')=='wecom' for _,a in ancestors)
  assert not any(a.get('data-hubpanel')=='operations' or a.get('id')=='huilima-platform-workspace' for _,a in ancestors)
- assert any(a.get('data-panel')=='hub' for _,a in ancestors)
+ assert not any(a.get('data-panel')=='hub' for _,a in ancestors)
  assert (PLUGIN/'web/operations.html').read_text().count('wcm-panel')==0
- workspace=(PLUGIN/'web/workspace.html').read_text()
- assert 'aria-controls="huilima-moments-workspace"' in workspace
- assert 'role="tablist"' in workspace and '@media(max-width:600px)' in workspace
+ top=(PLUGIN/'web/platform-navigation.html').read_text()
+ assert 'data-extension="wecom"' in top and 'data-pf="wecom"' not in top
+ assert 'aria-controls="huilima-wecom-page"' in top
+ assert any(tag=='header' for tag,_ in parser.parents['huilima-wecom-tab'])
+ assert any(a.get('class')=='pswitch' for _,a in parser.parents['huilima-wecom-tab'])
+ assert 'role="tablist" aria-label="企业微信功能"' in (PLUGIN/'web/moments.html').read_text()
 
 
 def test_host_keeps_minimal_explicit_plugin_workspace_hooks():
  js=(ROOT/'app/web/app.js').read_text()
- assert 'HuilimaPluginUI?.activateHubPanel?.(name)' in js
+ assert 'HuilimaPluginUI?.pageMeta?.(name)' in js
+ assert 'HuilimaPluginUI?.pageNames || []' in js
+ assert 'buttons[index].click()' in js
+ assert 'if (leavingExtensionPage) switchTab("hub", true)' in js
  assert 'HuilimaPluginUI?.pageContext?.(name, HUB_TAB)' in js
  assert 'wecom/moments' not in js
