@@ -119,3 +119,33 @@ def test_frontend_plugin_refresh_dispatch():
  if not node:pytest.skip('Node is unavailable')
  r=subprocess.run([node,'tests/web_huilima_plugin.cjs'],cwd=ROOT,capture_output=True,text=True,timeout=10)
  assert r.returncode==0,r.stderr
+
+
+def test_moments_workspace_not_nested_in_account_or_operations():
+ from html.parser import HTMLParser
+ class Structure(HTMLParser):
+  def __init__(self):super().__init__();self.stack=[];self.parents={};self.ids=[]
+  def handle_starttag(self,tag,attrs):
+   attrs=dict(attrs)
+   if 'id' in attrs:self.ids.append(attrs['id']);self.parents[attrs['id']]=list(self.stack)
+   if tag not in {'area','base','br','col','embed','hr','img','input','link','meta','param','source','track','wbr'}:self.stack.append((tag,attrs))
+  def handle_endtag(self,tag):
+   for i in range(len(self.stack)-1,-1,-1):
+    if self.stack[i][0]==tag:self.stack=self.stack[:i];break
+ parser=Structure();parser.feed(render_page((ROOT/'app/web/index.html').read_text()))
+ assert len(parser.ids)==len(set(parser.ids))
+ ancestors=parser.parents['wcm-panel']
+ assert any(a.get('data-hubpanel')=='moments' for _,a in ancestors)
+ assert not any(a.get('data-hubpanel')=='operations' or a.get('id')=='huilima-platform-workspace' for _,a in ancestors)
+ assert any(a.get('data-panel')=='hub' for _,a in ancestors)
+ assert (PLUGIN/'web/operations.html').read_text().count('wcm-panel')==0
+ workspace=(PLUGIN/'web/workspace.html').read_text()
+ assert 'aria-controls="huilima-moments-workspace"' in workspace
+ assert 'role="tablist"' in workspace and '@media(max-width:600px)' in workspace
+
+
+def test_host_keeps_minimal_explicit_plugin_workspace_hooks():
+ js=(ROOT/'app/web/app.js').read_text()
+ assert 'HuilimaPluginUI?.activateHubPanel?.(name)' in js
+ assert 'HuilimaPluginUI?.pageContext?.(name, HUB_TAB)' in js
+ assert 'wecom/moments' not in js

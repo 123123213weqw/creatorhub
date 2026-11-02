@@ -1091,12 +1091,13 @@ const PAGE_META = {
   },
 };
 function updatePageContext(name = CURRENT_TAB) {
-  const meta = PAGE_META[name] || PAGE_META.overview;
+  const extensionContext = globalThis.HuilimaPluginUI?.pageContext?.(name, HUB_TAB);
+  const meta = extensionContext || PAGE_META[name] || PAGE_META.overview;
   if ($("page-title")) $("page-title").textContent = meta.title;
   if ($("page-desc")) $("page-desc").textContent = meta.desc;
-  if ($("page-platform")) $("page-platform").textContent = PF_NAME[PLATFORM] || "当前平台";
-  if ($("page-kicker")) $("page-kicker").textContent = pfIsChannels(PLATFORM) ? "本账号工作台" : "多平台工作台";
-  document.title = `${meta.title} · ${PF_NAME[PLATFORM] || ""} | CreatorHub`;
+  if ($("page-platform")) $("page-platform").textContent = extensionContext?.platform || PF_NAME[PLATFORM] || "当前平台";
+  if ($("page-kicker")) $("page-kicker").textContent = extensionContext?.kicker || (pfIsChannels(PLATFORM) ? "本账号工作台" : "多平台工作台");
+  document.title = `${meta.title} · ${extensionContext?.platform || PF_NAME[PLATFORM] || ""} | CreatorHub`;
   globalThis.CreatorHubWorkbench?.navigate?.();
 }
 // 是否支持「发布」面板(四平台均有)
@@ -3115,6 +3116,8 @@ function switchHubTab(name) {
   try { localStorage.setItem("dym-hubtab", name); } catch (e) {}
   document.querySelectorAll("[data-hubpanel]").forEach(p => { p.style.display = p.dataset.hubpanel === name ? "" : "none"; });
   document.querySelectorAll("[data-hubtab]").forEach(t => t.classList.toggle("active", t.dataset.hubtab === name));
+  globalThis.HuilimaPluginUI?.activateHubPanel?.(name);
+  if (CURRENT_TAB === "hub") updatePageContext();
   if (name === "dm") startDmStream(); else stopDmStream();
   refreshHubPanel();
 }

@@ -60,4 +60,4 @@ python -m pytest -q tests/test_wecom_readonly.py tests/test_wecom_customer_reado
 
 ## 插件拆分进度
 
-独立包 0.1.0 第一阶段：实现模块、页面片段、资源与注册/生命周期已移出宿主；仍保留模型、发布、调度等必要安全适配，不是上游零改动插件。详见 [插件边界与后续收敛](../huilima_plugin/README.md)。现有 main 同步任务与运行中服务未改变。
+独立包 0.1.1 第一阶段：实现模块、页面片段、资源与注册/生命周期已移出宿主；仍保留模型、发布、调度等必要安全适配，不是上游零改动插件。详见 [插件边界与后续收敛](../huilima_plugin/README.md)。现有 main 同步任务与运行中服务未改变。

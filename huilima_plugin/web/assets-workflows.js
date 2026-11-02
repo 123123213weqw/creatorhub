@@ -112,12 +112,44 @@ async function previewMockCRM(id) {
   }catch(e){toast("CRM演练未完成："+e.message,"err");}
 }
 
-// One generic refresh dispatch hook in the existing Hub tab lifecycle.
+// Explicit host hooks; enterprise UI owns its workspace, not the account card.
+let HUILIMA_PLATFORM_PANEL = 'myworks';
 globalThis.HuilimaPluginUI = Object.freeze({
+  openWorkspace(name) {
+    if (!['platform', 'moments'].includes(name)) return;
+    switchHubTab(name === 'moments' ? 'moments' : HUILIMA_PLATFORM_PANEL);
+  },
+  workspaceKey(event) {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    event.preventDefault();
+    const current = event.target.dataset.huilimaWorkspace;
+    const target = event.key === 'Home' ? 'platform' : event.key === 'End' ? 'moments' : current === 'moments' ? 'platform' : 'moments';
+    HuilimaPluginUI.openWorkspace(target);
+    document.getElementById('huilima-' + target + '-tab')?.focus();
+  },
+  activateHubPanel(name) {
+    const enterprise = name === 'moments';
+    if (!enterprise) HUILIMA_PLATFORM_PANEL = name;
+    const host = document.getElementById('huilima-platform-workspace');
+    if (host) host.style.display = enterprise ? 'none' : '';
+    document.querySelectorAll('[data-huilima-workspace]').forEach(button => {
+      const active = button.dataset.huilimaWorkspace === (enterprise ? 'moments' : 'platform');
+      button.setAttribute('aria-selected', String(active));
+      button.tabIndex = active ? 0 : -1;
+    });
+  },
+  pageContext(page, panel) {
+    if (page !== 'hub' || panel !== 'moments') return;
+    return {title: '企微朋友圈', desc: '独立管理客户朋友圈草稿、人工审核与成员发表结果；不随平台账号切换。', platform: '企业微信', kicker: 'Huilima 独立工作区'};
+  },
   refreshPanel(name) {
     if (name === "leads") { refreshLeadCandidates(); return true; }
     if (name === "assets") { refreshLocalAssets(); return true; }
     if (name === "operations") { refreshOperations(); return true; }
+    if (name === 'moments') {
+      if (typeof wcmLoad === 'function' && document.documentElement.dataset.preview !== 'true') wcmLoad();
+      return true;
+    }
     return false;
   }
 });

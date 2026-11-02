@@ -3,7 +3,7 @@ import hashlib
 from pathlib import Path
 
 WEB_ROOT = Path(__file__).parent / 'web'
-SLOTS = ('navigation', 'leads', 'assets', 'operations', 'scripts-before', 'scripts-after')
+SLOTS = ('workspace', 'moments', 'navigation', 'leads', 'assets', 'operations', 'scripts-before', 'scripts-after')
 ASSETS = ('operations.js', 'assets-workflows.js', 'wecom.js', 'wecom-moments.js', 'integrations-v9.js')
 
 def asset_path(name):

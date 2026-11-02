@@ -1,0 +1,26 @@
+<style>
+  .huilima-workspace-nav { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:14px 18px; border:1px solid var(--line); border-radius:var(--r); background:var(--surface); }
+  .huilima-workspace-label { display:grid; gap:2px; min-width:0; }
+  .huilima-workspace-label strong { font-size:13px; color:var(--fg-strong); }
+  .huilima-workspace-label span { font-size:12px; color:var(--mut); }
+  .huilima-workspace-tabs { display:flex; gap:8px; margin-left:auto; flex-shrink:0; }
+  .huilima-workspace-tabs button { min-height:42px; border:1px solid var(--line); border-radius:var(--r-sm); background:var(--surface-2); color:var(--fg); padding:9px 16px; }
+  .huilima-workspace-tabs button[aria-selected="true"] { border-color:var(--acc-ring); background:var(--acc-soft); color:var(--acc); }
+  .huilima-workspace-tabs #huilima-moments-tab[aria-selected="true"] { border-color:var(--success); background:color-mix(in srgb,var(--success) 12%,var(--surface)); color:var(--fg-strong); }
+  .huilima-workspace-tabs button:focus-visible { outline:2px solid var(--fg); outline-offset:3px; }
+  .huilima-moments-scope { color:var(--mut); padding:10px 12px; margin-bottom:14px; border-left:3px solid var(--success); background:var(--surface-2); border-radius:var(--r-xs); font-size:12px; }
+  .huilima-moments-workspace .card-head { flex-wrap:wrap; }
+  .huilima-moments-workspace h2 { flex-wrap:wrap; }
+  @media(max-width:600px) {
+    .huilima-workspace-nav { flex-direction:column; align-items:stretch; gap:12px; padding:14px; }
+    .huilima-workspace-tabs { display:grid; grid-template-columns:1fr 1fr; margin-left:0; }
+    .huilima-workspace-tabs button { min-width:0; padding:9px 8px; }
+  }
+</style>
+<div class="huilima-workspace-nav">
+  <div class="huilima-workspace-label"><strong>工作区</strong><span>平台账号与企微朋友圈分开管理</span></div>
+  <div class="huilima-workspace-tabs" role="tablist" aria-label="Hub 工作区" onkeydown="HuilimaPluginUI.workspaceKey(event)">
+    <button id="huilima-platform-tab" type="button" role="tab" aria-selected="true" aria-controls="huilima-platform-workspace" data-huilima-workspace="platform" onclick="HuilimaPluginUI.openWorkspace('platform')">平台账号</button>
+    <button id="huilima-moments-tab" type="button" role="tab" aria-selected="false" aria-controls="huilima-moments-workspace" tabindex="-1" data-huilima-workspace="moments" onclick="HuilimaPluginUI.openWorkspace('moments')">企微朋友圈</button>
+  </div>
+</div>

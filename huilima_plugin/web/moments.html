@@ -1,0 +1,18 @@
+<div class="card huilima-moments-workspace" id="huilima-moments-workspace" data-hubpanel="moments" role="tabpanel" aria-labelledby="huilima-moments-tab" style="display:none">
+  <div class="card-head">
+    <span class="card-ic"><svg aria-hidden="true"><use href="#i-send"/></svg></span>
+    <h2>企微客户朋友圈 <span class="sub">Huilima 独立工作区</span></h2>
+  </div>
+  <div class="huilima-moments-scope">企业级 · 不绑定平台账号 · 创建任务后仍需成员在企微发表</div>
+  <div id="wcm-panel">
+          <p class="hint">企业级独立工作区，不随抖音等平台账号切换。先建本地草稿，再由本机管理员审核并单次提交；创建任务不等于已发表，成员仍须在企微确认。必须指定唯一成员和企业客户标签，不默认全体客户。支持纯文字、最多9张JPG/PNG或一个≤10MB且≤30秒的MP4；不自动上传、重试或轮询，不采集普通群聊天。</p>
+          <div class="row" style="gap:8px;flex-wrap:wrap">
+            <button class="ghost" type="button" onclick="wcmLoad()">查看本地草稿 / 状态</button>
+            <button class="ghost" type="button" onclick="wcmPreflight()">手动核对唯一成员</button>
+            <button type="button" onclick="wcmDraft()">新建本地朋友圈草稿</button>
+            <button class="ghost" type="button" onclick="wcmReceipt()">核对原请求回执</button>
+          </div>
+          <p id="wcm-status" role="status">尚未读取；点击“查看本地草稿 / 状态”只读取本机缓存。</p>
+          <div id="wcm-list"></div>
+  </div>
+</div>

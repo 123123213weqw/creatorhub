@@ -26,18 +26,6 @@
           </div>
           <pre id="v9-summary" role="status" style="white-space:pre-wrap;overflow-wrap:anywhere">尚未读取交付状态。</pre>
         </details>
-        <details id="wcm-panel" ontoggle="if(this.open)wcmLoad()">
-          <summary>企微客户朋友圈 · 人工审核创建</summary>
-          <p class="hint">沿用当前 Hub。先建本地草稿，再由本机管理员审核并单次提交；创建任务不等于已发表，成员仍须在企微确认。必须指定唯一成员和企业客户标签，不默认全体客户。支持纯文字、最多9张JPG/PNG或一个≤10MB且≤30秒的MP4；不自动上传、重试或轮询，不采集普通群聊天。</p>
-          <div class="row" style="gap:8px;flex-wrap:wrap">
-            <button class="ghost" type="button" onclick="wcmLoad()">查看本地草稿 / 状态</button>
-            <button class="ghost" type="button" onclick="wcmPreflight()">手动核对唯一成员</button>
-            <button type="button" onclick="wcmDraft()">新建本地朋友圈草稿</button>
-            <button class="ghost" type="button" onclick="wcmReceipt()">核对原请求回执</button>
-          </div>
-          <p id="wcm-status" role="status">尚未读取；展开仅查看本地缓存。</p>
-          <div id="wcm-list"></div>
-        </details>
         <div id="ops-once-token" class="hint" hidden style="overflow-wrap:anywhere" role="status"></div>
         <div id="ops-content-actions" style="display:flex;gap:8px;flex-wrap:wrap;margin:16px 0"><button onclick="opsContent()">新建内容版本</button><button class="ghost" onclick="opsNewVersion()">追加不可变版本</button><button class="ghost" onclick="opsPersona()">账号人设</button><button class="ghost" onclick="opsPlan()">新建草稿批次</button><button class="ghost" onclick="opsManual()">人工发布回填</button><button class="ghost" onclick="opsEnqueueCRM()">已复核线索入表队列</button></div>
         <details open><summary>内容与账号变体</summary><div id="ops-contents"></div></details>
