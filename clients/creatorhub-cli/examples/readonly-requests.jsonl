@@ -1,0 +1,4 @@
+{"id": "capabilities", "command": "capabilities"}
+{"id": "doctor", "command": "doctor"}
+{"id": "handoff", "command": "operations.handoff"}
+{"id": "backup-policy", "command": "backup.policy"}

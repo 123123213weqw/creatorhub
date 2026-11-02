@@ -1,0 +1,19 @@
+{
+  "app_id": "cli_YOURAPPID",
+  "app_secret": "REPLACE_LOCALLY_NOT_A_REAL_SECRET",
+  "allowed_sender_open_ids": ["ou_REPLACE_WITH_YOUR_AUTHORIZED_SENDER"],
+  "ai": {
+    "enabled": false,
+    "base_url": "https://api.deepseek.com",
+    "model": "deepseek-flash",
+    "api_key": "REPLACE_LOCALLY_NOT_A_REAL_KEY",
+    "max_input_chars": 8000,
+    "max_output_tokens": 1024,
+    "max_calls_per_day": 100
+  },
+  "hub": {
+    "enabled": false,
+    "base_url": "http://127.0.0.1:18080",
+    "label": "CreatorHub"
+  }
+}

@@ -9,9 +9,9 @@ from fastapi import HTTPException
 from sqlalchemy.exc import IntegrityError
 
 from .models import (TaskSubmission, PublishTask, AccountActionTask, CommentRule,
-                     DmAutoReplyRule, KeywordCollectionJob)
+                     DmAutoReplyRule, KeywordCollectionJob, SyncRequest, LeadCandidate)
 
-_MODELS = {"publish": PublishTask, "repost": PublishTask,
+_MODELS = {"publish": PublishTask, "sync": SyncRequest, "lead": LeadCandidate, "repost": PublishTask,
            "account-action": AccountActionTask, "comment-rule": CommentRule,
            "dm-rule": DmAutoReplyRule, "collection": KeywordCollectionJob}
 

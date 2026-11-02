@@ -1,0 +1,14 @@
+#!/usr/bin/env python3
+import sys
+import os
+import shutil
+import json
+from pathlib import Path
+if sys.version_info < (3, 11):
+    for candidate in [shutil.which("python3.11"), shutil.which("python3.12"), "/opt/homebrew/opt/python@3.11/bin/python3.11"]:
+        if candidate and Path(candidate).is_file():
+            os.execv(candidate,[candidate,str(Path(__file__).resolve()),*sys.argv[1:]])
+    print(json.dumps({"ok":False,"error":{"code":"python_version","message":"需要 Python 3.11+"}}));raise SystemExit(7)
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
+from creatorhub_cli.cli import main
+raise SystemExit(main())

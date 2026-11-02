@@ -42,3 +42,19 @@ config.yaml
 
 # 内部方案文档(不随公开仓库发布)
 docs/
+
+# Private integration configuration and runtime state
+.env
+.env.*
+!*.example
+*.sqlite
+*.sqlite3
+*.sqlite3-*
+*.db-*
+profiles/
+media/
+*.pem
+*.key
+credentials.json
+config.json
+status.json

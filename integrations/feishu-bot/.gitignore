@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.py[cod]
+config.json
+.env
+.env.*
+*.sqlite*
+*.db
+*.jsonl
+*.log
+status.json
+service.plist
+backups/

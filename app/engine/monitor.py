@@ -826,6 +826,8 @@ class MonitorEngine:
                     await self._check_work_health()
                     await self._process_xhs_dm_automation()
                     await self._process_publish()
+                    from ..sync_requests import process_one
+                    await process_one(getattr(self, "sync_handlers", {}))
                     await self._process_comment_rules()
                     await self._process_comment_tasks()
                     await self._process_action_tasks()
@@ -3723,6 +3725,20 @@ class MonitorEngine:
                 return {"ok": False, "error": "任务不存在"}
             if t.status not in ("pending", "failed"):
                 return {"ok": False, "error": f"任务状态为 {t.status}"}
+            from ..publish_review import review_valid, review_expired, publish_slot
+            now = datetime.utcnow()
+            if review_expired(t, now):
+                t.status = "draft"; t.approved_digest = ""; t.approved_at = None
+                t.error = "确认的发布窗口已过 30 分钟，请重新核对时间后确认；不会集中补发"
+                s.add(t); s.commit()
+                return {"ok": False, "error": "review_expired"}
+            if t.review_required and t.scheduled_at and t.scheduled_at > now:
+                return {"ok": False, "error": "等待人工确认的预约时间"}
+            if not review_valid(t):
+                t.status = "draft"; t.approved_digest = ""; t.approved_at = None
+                t.error = "内容或素材未通过确认校验，请在 Hub 重新核对"
+                s.add(t); s.commit()
+                return {"ok": False, "error": "review_required"}
             if t.scheduled_at and not t.scheduled_at_is_utc:
                 return {"ok": False, "error": "请先编辑并确认预约时区，再执行发布"}
             deferred = self._task_deferral(t)
@@ -3782,6 +3798,23 @@ class MonitorEngine:
             location = getattr(t, "location", "") or ""
             platform = t.platform
             files = _loads_list(t.media_json)
+            if t.review_required:
+                # RiskController uses its own short transactions. Do not hold a
+                # SQLite writer lock across preflight. Re-read/CAS the reviewed
+                # version only at the final transition, before any adapter runs.
+                expected_version, expected_digest = t.review_version, t.review_digest
+                s.rollback()
+                s.connection().exec_driver_sql("BEGIN IMMEDIATE")
+                t = s.get(PublishTask, task_id)
+                if (not t or t.status not in ("pending", "failed")
+                        or t.review_version != expected_version
+                        or t.review_digest != expected_digest or not review_valid(t)):
+                    return {"ok": False, "error": "review_changed_before_execution"}
+                next_slot = publish_slot(s, t, datetime.utcnow(), reserve=True)
+                if next_slot:
+                    self._defer_row(t, "本机错峰发布间隔（非平台安全阈值）", next_slot)
+                    s.add(t); s.commit()
+                    return {"ok": False, "error": "publish_staggered"}
             t.status = "publishing"; t.error = ""
             self._clear_row_block(t)
             s.add(t); s.commit()
@@ -3830,7 +3863,14 @@ class MonitorEngine:
                 ok, url, err = await publish_douyin(self.browser, identity, state,
                                                     media_type, title, desc, files,
                                                     topics=topics, visibility=visibility,
-                                                    allow_save=allow_save, headed=True)
+                                                    allow_save=allow_save, headed=True,
+                                                    on_submit=lambda: self._mark_write_submit(
+                                                        PublishTask, task_id, channel="browser"))
+            except asyncio.CancelledError:
+                await self._finish_publish(
+                    task_id, False, "", "write_uncertain:发布已中断，结果需到平台核对",
+                    platform="douyin")
+                raise
             except Exception as e:
                 ok, url, err = False, "", f"发布异常: {e!r}"
             return await self._finish_publish(task_id, ok, url, err, platform="douyin")

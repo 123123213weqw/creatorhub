@@ -319,6 +319,14 @@ class PublishTask(SQLModel, table=True):
     scheduled_at: Optional[datetime] = None            # UTC；空=尽快发
     scheduled_at_is_utc: bool = True  # 存量无时区预约需要人工确认，不自动猜时区
     status: str = "pending"        # draft | pending | publishing | uncertain | done | failed | canceled
+    # CLI drafts require a content-bound review in the existing workbench.
+    demo_only: bool = False  # demo material can NEVER be queued for real publishing
+    review_required: bool = False  # additive: existing tasks retain their behavior
+    review_version: int = 1
+    review_digest: str = ""
+    approved_digest: str = ""
+    approved_at: Optional[datetime] = None
+    media_manifest: str = "[]"  # Hub-owned immutable copies + SHA256, never cookies
     result_url: str = ""           # 发布成功后的笔记链接(能取到则填)
     error: str = ""
     blocked_reason: str = ""
@@ -869,3 +877,123 @@ class ShareDownloadRecord(SQLModel, table=True):
     metadata_json: str = "{}"
     error: str = ""
     created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+
+
+class SyncRequest(SQLModel, table=True):
+    """A bounded local read request owned and executed by the existing Hub."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    platform: str
+    account_id: int = Field(index=True)
+    kind: str  # works | comments
+    work_id: Optional[int] = None
+    work_item_id: str = ""  # immutable platform target, protects reused local IDs
+    active_key: Optional[str] = Field(default=None, unique=True, index=True)
+    status: str = Field(default="pending", index=True)
+    attempts: int = 0
+    next_allowed_at: Optional[datetime] = None
+    blocked_reason: str = ""
+    error: str = ""
+    fetched: int = 0
+    added: int = 0
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    started_at: Optional[datetime] = None
+    finished_at: Optional[datetime] = None
+
+
+class SyncPacing(SQLModel, table=True):
+    """Persistent business pacing, account 0 is the global serial read gate."""
+    account_id: int = Field(primary_key=True)
+    next_allowed_at: datetime
+
+
+class PublishPacing(SQLModel, table=True):
+    """Business staggering for reviewed drafts; 0 is the global publish gate."""
+    account_id: int = Field(primary_key=True)
+    next_allowed_at: datetime
+
+
+class VideoBackupConfig(SQLModel, table=True):
+    """Unconfigured until an administrator selects an existing storage root."""
+    id: int = Field(default=1, primary_key=True)
+    provider: str = "unconfigured"
+    root: str = ""
+    store_id: str = ""
+    max_bytes: int = 10 * 1024**3
+    cloud_upload_authorized: bool = False
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class VideoBackupOperation(SQLModel, table=True):
+    """Local IO operations; business state stays in the existing Hub database."""
+    id: str = Field(primary_key=True)
+    request_hash: str = Field(unique=True, index=True)
+    payload_hash: str
+    kind: str  # snapshot | verify | restore
+    snapshot_id: str = ""
+    status: str = "pending"  # pending | running | done | failed | interrupted
+    provider: str = "local_directory"
+    root: str = ""  # administrator-only destination; never forwarded to a model
+    store_id: str = ""
+    max_bytes: int = 0
+    restore_parent: str = ""
+    cloud_upload_authorized: bool = False
+    manifest_sha256: str = ""
+    result_json: str = "{}"
+    error_code: str = ""
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    finished_at: Optional[datetime] = None
+
+
+class LocalMediaAsset(SQLModel, table=True):
+    """Explicitly imported Hub-owned material; bots receive IDs, never paths."""
+    id: str = Field(primary_key=True)
+    label: str
+    media_type: str
+    manifest_json: str
+    is_demo: bool = False
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class LeadCandidate(SQLModel, table=True):
+    """An explainable local comment signal, not an inferred paying customer."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    source_key: str = Field(unique=True, index=True)
+    external_key: str = Field(index=True)
+    platform: str
+    account_id: int = Field(index=True)
+    work_id: int
+    item_id: str
+    comment_id: str
+    source_nickname: str = ""
+    comment_text: str
+    signal_tags: str = "[]"
+    version: int = 1
+    digest: str = ""
+    state: str = Field(default="candidate", index=True)
+    approved_digest: str = ""
+    owner_label: str = ""
+    review_note: str = ""
+    reviewed_at: Optional[datetime] = None
+    is_demo: bool = False
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class MockCustomerRecord(SQLModel, table=True):
+    """Local CRM rehearsal only, never presented as a real Feishu record."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    external_key: str = Field(unique=True, index=True)
+    lead_id: int
+    operation_token: str
+    fields_json: str
+    mode: str = "local_mock"
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+# Register business tables for normal init_db and offline migration rehearsal.
+from .business_models import (TeamActor, TeamCredential, BusinessContent,
+    ContentVersion, AccountPersona, ContentVariant, PublishPlan, PublishPlanItem,
+    DistributionTask, DistributionTarget, DistributionProof, ProofVerification,
+    ManualPublishRecord, CRMDeliveryConfig, DeliveryEvent, MockDeliveryRecord,
+    OpsIncident, OpsCheck, BusinessAudit)
+
+from .cloud_storage_models import CloudStorageWrite

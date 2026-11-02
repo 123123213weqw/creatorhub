@@ -1,0 +1,867 @@
+{
+  "schema_version": "1.0",
+  "cli_version": "0.11.0",
+  "transport": "local_stdio_jsonl",
+  "default_readonly": true,
+  "requires_local_process_execution": true,
+  "network_listener": false,
+  "mcp_server": false,
+  "request_shape": {
+    "id": "caller-safe-id",
+    "command": "catalog.command",
+    "args": {}
+  },
+  "tools": [
+    {
+      "name": "hub_accounts_list",
+      "command": "accounts.list",
+      "read_only": true,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "platform": {
+            "type": "string",
+            "enum": [
+              "all",
+              "douyin",
+              "xhs",
+              "kuaishou",
+              "shipinhao",
+              "tiktok"
+            ]
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10000
+          },
+          "page_size": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "hub_assets_list",
+      "command": "assets.list",
+      "read_only": true,
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "hub_backup_list",
+      "command": "backup.list",
+      "read_only": true,
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "hub_backup_policy",
+      "command": "backup.policy",
+      "read_only": true,
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "hub_backup_show",
+      "command": "backup.show",
+      "read_only": true,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "operation_id": {
+            "type": "string",
+            "pattern": "^vbak_[a-f0-9]{32}$"
+          }
+        },
+        "required": [
+          "operation_id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "hub_backup_status",
+      "command": "backup.status",
+      "read_only": true,
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "hub_collections_results",
+      "command": "collections.results",
+      "read_only": true,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "platform": {
+            "type": "string",
+            "enum": [
+              "all",
+              "douyin",
+              "xhs",
+              "kuaishou",
+              "shipinhao",
+              "tiktok"
+            ]
+          },
+          "job_id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10000
+          },
+          "page_size": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "hub_comments_list",
+      "command": "comments.list",
+      "read_only": true,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "account_id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "work_id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10000
+          },
+          "page_size": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          }
+        },
+        "required": [
+          "account_id",
+          "work_id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "hub_content_list",
+      "command": "content.list",
+      "read_only": true,
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "hub_crm_preflight_status",
+      "command": "crm.preflight-status",
+      "read_only": true,
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "hub_crm_preview",
+      "command": "crm.preview",
+      "read_only": true,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "lead_id": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "lead_id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "hub_delivery_list",
+      "command": "delivery.list",
+      "read_only": true,
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "hub_distribution_list",
+      "command": "distribution.list",
+      "read_only": true,
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "hub_distribution_materials",
+      "command": "distribution.materials",
+      "read_only": true,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "pattern": "^distribution_[a-f0-9]{32}$"
+          }
+        },
+        "required": [
+          "task_id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "hub_distribution_show",
+      "command": "distribution.show",
+      "read_only": true,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "pattern": "^distribution_[a-f0-9]{32}$"
+          }
+        },
+        "required": [
+          "task_id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "hub_doctor",
+      "command": "doctor",
+      "read_only": true,
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "hub_leads_list",
+      "command": "leads.list",
+      "read_only": true,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "account_id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10000
+          },
+          "page_size": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "candidate",
+              "approved",
+              "rejected",
+              "recorded_mock"
+            ]
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "hub_leads_status",
+      "command": "leads.status",
+      "read_only": true,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "lead_id": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "lead_id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "hub_manual_list",
+      "command": "manual.list",
+      "read_only": true,
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "hub_observations_list",
+      "command": "observations.list",
+      "read_only": true,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "account_id": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "hub_observations_show",
+      "command": "observations.show",
+      "read_only": true,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "observation_id": {
+            "type": "string",
+            "pattern": "^observation_[a-f0-9]{32}$"
+          }
+        },
+        "required": [
+          "observation_id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "hub_operations_handoff",
+      "command": "operations.handoff",
+      "read_only": true,
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "hub_operations_health",
+      "command": "operations.health",
+      "read_only": true,
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "hub_operations_profile",
+      "command": "operations.profile",
+      "read_only": true,
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "hub_operations_readiness",
+      "command": "operations.readiness",
+      "read_only": true,
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "hub_operations_report",
+      "command": "operations.report",
+      "read_only": true,
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "hub_overview",
+      "command": "overview",
+      "read_only": true,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "platform": {
+            "type": "string",
+            "enum": [
+              "all",
+              "douyin",
+              "xhs",
+              "kuaishou",
+              "shipinhao",
+              "tiktok"
+            ]
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "hub_persona_list",
+      "command": "persona.list",
+      "read_only": true,
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "hub_plan_list",
+      "command": "plan.list",
+      "read_only": true,
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "hub_proof_show",
+      "command": "proof.show",
+      "read_only": true,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "proof_id": {
+            "type": "string",
+            "pattern": "^proof_[a-f0-9]{32}$"
+          }
+        },
+        "required": [
+          "proof_id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "hub_publish_list",
+      "command": "publish.list",
+      "read_only": true,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "platform": {
+            "type": "string",
+            "enum": [
+              "all",
+              "douyin",
+              "xhs",
+              "kuaishou",
+              "shipinhao",
+              "tiktok"
+            ]
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10000
+          },
+          "page_size": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "hub_publish_status",
+      "command": "publish.status",
+      "read_only": true,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "task_id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "hub_requests_status",
+      "command": "requests.status",
+      "read_only": true,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "operation": {
+            "type": "string",
+            "enum": [
+              "publish",
+              "sync",
+              "asset",
+              "leads"
+            ]
+          },
+          "request_key": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{15,127}$",
+            "maxLength": 128
+          }
+        },
+        "required": [
+          "operation",
+          "request_key"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "hub_risk_status",
+      "command": "risk.status",
+      "read_only": true,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "platform": {
+            "type": "string",
+            "enum": [
+              "all",
+              "douyin",
+              "xhs",
+              "kuaishou",
+              "shipinhao",
+              "tiktok"
+            ]
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "hub_stats_show",
+      "command": "stats.show",
+      "read_only": true,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "account_id": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "account_id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "hub_sync_status",
+      "command": "sync.status",
+      "read_only": true,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "task_id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "hub_tasks_list",
+      "command": "tasks.list",
+      "read_only": true,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "platform": {
+            "type": "string",
+            "enum": [
+              "all",
+              "douyin",
+              "xhs",
+              "kuaishou",
+              "shipinhao",
+              "tiktok"
+            ]
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "active",
+              "pending",
+              "running",
+              "blocked",
+              "failed",
+              "completed",
+              "all"
+            ]
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10000
+          },
+          "page_size": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "hub_team_list",
+      "command": "team.list",
+      "read_only": true,
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "hub_team_session",
+      "command": "team.session",
+      "read_only": true,
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "hub_wecom_business_request",
+      "command": "wecom.business-request",
+      "read_only": true,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "request_key": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{15,127}$",
+            "maxLength": 128
+          }
+        },
+        "required": [
+          "request_key"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "hub_wecom_business_status",
+      "command": "wecom.business-status",
+      "read_only": true,
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "hub_wecom_moments_binding",
+      "command": "wecom.moments-binding",
+      "read_only": true,
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "hub_wecom_moments_list",
+      "command": "wecom.moments-list",
+      "read_only": true,
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "hub_wecom_moments_receipt",
+      "command": "wecom.moments-receipt",
+      "read_only": true,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "operation": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "preflight"
+            ]
+          },
+          "request_key": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{15,127}$",
+            "maxLength": 128
+          }
+        },
+        "required": [
+          "operation",
+          "request_key"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "hub_wecom_moments_status",
+      "command": "wecom.moments-status",
+      "read_only": true,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "pattern": "^wecom_moment_[a-f0-9]{32}$"
+          }
+        },
+        "required": [
+          "task_id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "hub_wecom_request",
+      "command": "wecom.request",
+      "read_only": true,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "request_key": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{15,127}$",
+            "maxLength": 128
+          }
+        },
+        "required": [
+          "request_key"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "hub_wecom_status",
+      "command": "wecom.status",
+      "read_only": true,
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "hub_works_list",
+      "command": "works.list",
+      "read_only": true,
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "account_id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10000
+          },
+          "page_size": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          }
+        },
+        "required": [
+          "account_id"
+        ],
+        "additionalProperties": false
+      }
+    }
+  ]
+}

@@ -7,7 +7,7 @@ from sqlmodel import select
 
 from .models import (
     AccountActionTask, CommentRule, CommentTask, CommentWatch, DanmakuWatch,
-    DmAutoReplyRule, KeywordCollectionJob, MonitorTarget, PublishTask,
+    DmAutoReplyRule, KeywordCollectionJob, MonitorTarget, PublishTask, SyncRequest,
 )
 
 
@@ -17,6 +17,7 @@ class AccountUnavailableError(RuntimeError):
 
 def active_account_task(session, account_id: int) -> str:
     for model, statuses, label in (
+        (SyncRequest, ("running",), "低频同步"),
         (PublishTask, ("publishing",), "发布"),
         (CommentTask, ("doing",), "评论"),
         (AccountActionTask, ("doing",), "账号操作"),
@@ -51,6 +52,13 @@ def retire_account_tasks(session, account_id: int) -> dict[str, int]:
             row.error = reason
             session.add(row)
             counts["canceled_tasks"] += 1
+    for row in session.exec(select(SyncRequest).where(
+            SyncRequest.account_id == account_id,
+            SyncRequest.status.in_(("pending", "failed")))).all():
+        row.status = "canceled"; row.active_key = None
+        row.error = reason; row.blocked_reason = ""; row.next_allowed_at = None
+        row.finished_at = datetime.utcnow(); session.add(row)
+        counts["canceled_tasks"] += 1
     for row in session.exec(select(KeywordCollectionJob).where(
             KeywordCollectionJob.account_id == account_id,
             KeywordCollectionJob.status.in_(("pending", "partial", "failed")))).all():

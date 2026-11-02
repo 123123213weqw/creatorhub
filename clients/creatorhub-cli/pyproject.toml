@@ -1,0 +1,14 @@
+[build-system]
+requires = ["setuptools>=65"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "creatorhub-cli"
+version = "0.12.0"
+description = "现有 CreatorHub 的无界面 JSON 命令行客户端"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+hubctl = "creatorhub_cli.cli:main"
+hubctl-jsonl = "creatorhub_cli.bridge:main"

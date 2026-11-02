@@ -26,7 +26,7 @@ import uuid as _uuid
 from fastapi import Body, FastAPI, HTTPException, Request, UploadFile, File
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field as PydanticField, StrictInt, ValidationError
+from pydantic import BaseModel, Field as PydanticField, StrictInt, StrictBool, ValidationError, ConfigDict
 from sqlalchemy import delete, func, or_, update
 from sqlmodel import select
 
@@ -69,6 +69,9 @@ from .platforms.douyin import (
 )
 from .config import load_config
 from .db import get_session, init_db
+from .models import SyncRequest
+from . import sync_requests
+from .publish_review import snapshot_media, content_digest, media_intact
 from .account_merge import (
     cleanup_merged_profiles,
     duplicate_xhs_account_ids,
@@ -601,11 +604,14 @@ async def lifespan(app: FastAPI):
         douyin_read_session_callback=_persist_douyin_read_session)
     await browser.start()
     engine = MonitorEngine(cfg, browser)
+    engine.sync_handlers = {"works": sync_account_works, "comments": sync_work_comments}
     startup_now = datetime.utcnow()
     pruned_risk_events = engine._prune_risk_events_if_due(startup_now)
     if pruned_risk_events:
         print(f"[startup] 已清理 {pruned_risk_events} 条过期风控事件")
-    recovered = engine.recover_interrupted_tasks()
+    from . import video_backup, delivery_workflows, operations_health, wecom_moments
+    recovered = (engine.recover_interrupted_tasks() + sync_requests.recover() + video_backup.recover()
+                 + delivery_workflows.recover() + wecom_moments.recover())
     if recovered:
         print(f"[startup] 已恢复 {recovered} 条中断的写任务")
     engine.start()
@@ -624,7 +630,10 @@ async def lifespan(app: FastAPI):
                 print(f"[webhook] 事件投递循环异常: {exc!r}")
             await asyncio.sleep(15)
     _webhook_delivery_task = asyncio.create_task(webhook_delivery_loop())
+    operations_health_task = asyncio.create_task(operations_health.monitor_loop())
     yield
+    operations_health_task.cancel()
+    await asyncio.gather(operations_health_task, return_exceptions=True)
     if _webhook_delivery_task:
         _webhook_delivery_task.cancel()
         await asyncio.gather(_webhook_delivery_task, return_exceptions=True)
@@ -644,7 +653,31 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="CreatorHub", lifespan=lifespan)
+from .business_workflows import TeamBoundaryMiddleware
+app.add_middleware(TeamBoundaryMiddleware)
 app.add_middleware(LocalAccessMiddleware)
+from .operations_workflows import router as operations_workflows_router
+app.include_router(operations_workflows_router)
+from .video_backup import router as video_backup_router
+app.include_router(video_backup_router)
+from .business_workflows import router as business_router
+from .delivery_workflows import router as delivery_router
+from .operations_health import router as operations_health_router
+app.include_router(business_router)
+app.include_router(delivery_router)
+app.include_router(operations_health_router)
+from .wecom_workflows import router as wecom_workflows_router
+app.include_router(wecom_workflows_router)
+from .crm_preflight import router as crm_preflight_router
+from .observations import router as observations_router
+app.include_router(crm_preflight_router)
+app.include_router(observations_router)
+from .wecom_business_workflows import router as wecom_business_router
+app.include_router(wecom_business_router)
+from .delivery_profile import router as delivery_profile_router
+app.include_router(delivery_profile_router)
+from .wecom_moments import router as wecom_moments_router
+app.include_router(wecom_moments_router)
 WEB_DIR = Path(__file__).parent / "web"
 
 
@@ -1839,7 +1872,7 @@ async def list_accounts(platform: str | None = None):
 # ─────────── 统一任务队列 ───────────
 _QUEUE_TYPES = {
     "collections", "publishes", "comments", "actions",
-    "monitor_downloads", "collection_downloads",
+    "monitor_downloads", "collection_downloads", "syncs",
 }
 _QUEUE_STATES = {"active", "pending", "running", "blocked", "failed", "completed", "all"}
 _QUEUE_RUNNING = {"running", "publishing", "doing", "downloading"}
@@ -1941,6 +1974,7 @@ async def list_task_queue(platform: str | None = None, queue_type: str = "",
             })
 
         task_specs = (
+            (SyncRequest, ["pending", "running", "failed"], ["done", "canceled"]),
             (KeywordCollectionJob,
              ["pending", "running", "failed", "partial"], ["done", "canceled"]),
             (PublishTask,
@@ -1992,6 +2026,15 @@ async def list_task_queue(platform: str | None = None, queue_type: str = "",
                 scheduled_at=row.started_at, source_tab="collections",
                 blocked_reason=row.blocked_reason, blocked_signal=row.blocked_signal,
                 next_allowed_at=row.next_allowed_at, error=row.error)
+
+        for row in loaded[SyncRequest]:
+            add(queue="syncs", queue_label="低频同步", row_id=row.id,
+                row_platform=row.platform, account_id=row.account_id,
+                title="自有作品同步" if row.kind == "works" else f"作品 #{row.work_id} 评论同步",
+                detail=f"已读取 {row.fetched} / 新增 {row.added}；尝试 {row.attempts}/3",
+                status=row.status, created_at=row.created_at, source_tab="queue",
+                blocked_reason=row.blocked_reason, next_allowed_at=row.next_allowed_at,
+                error=row.error)
 
         for row in loaded[PublishTask]:
             add(
@@ -3554,6 +3597,36 @@ async def sync_account_works(account_id: int):
             "source": source,
             "configured_mode": (transport["configured_mode"]
                                 if transport else "browser")}
+
+
+class SyncRequestIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    account_id: StrictInt = PydanticField(gt=0)
+    kind: str = PydanticField(pattern="^(works|comments)$")
+    work_id: StrictInt | None = PydanticField(default=None, gt=0)
+
+
+def _require_submission_key(request):
+    if request is None or not request.headers.get("Idempotency-Key"):
+        raise HTTPException(422, "请提供稳定的 Idempotency-Key，响应不明时沿用原编号")
+
+
+@app.post("/api/sync-requests")
+async def request_sync(body: SyncRequestIn, request: Request):
+    _require_submission_key(request)
+    with get_session() as session:
+        result, _ = submit_once(session, request=request, scope="sync", body=body,
+                                create=lambda: sync_requests.create_request(session, body))
+        return result
+
+
+@app.get("/api/sync-requests/{task_id:int}")
+async def sync_request_status(task_id: int):
+    with get_session() as session:
+        row = session.get(SyncRequest, task_id)
+        if row is None:
+            raise HTTPException(404, "同步请求不存在")
+        return sync_requests.as_dict(row)
 
 
 # ─────────── 本账号数据分析(B4:粉丝/作品/互动趋势 + 单篇作品表)───────────
@@ -10102,6 +10175,7 @@ class PublishUpdate(BaseModel):
     visibility: str | None = None
     allow_save: bool | None = None
     scheduled_at: str | None = None
+    review_version: int | None = None
 
 
 def _publish_dict(t: PublishTask) -> dict:
@@ -10120,6 +10194,8 @@ def _publish_dict(t: PublishTask) -> dict:
         "media_type": t.media_type, "title": t.title, "desc": t.desc,
         "topics": t.topics, "location": t.location,
         "status": t.status, "result_url": result_url,
+        "demo_only": t.demo_only, "review_required": t.review_required, "review_version": t.review_version,
+        "review_digest": t.review_digest, "approved_at": utc_iso(t.approved_at),
         "visibility": t.visibility, "allow_save": t.allow_save,
         "error": t.error, "media_count": len(json.loads(t.media_json or "[]")),
         "source_platform": t.source_platform, "source_content_id": t.source_content_id,
@@ -10190,14 +10266,133 @@ async def add_publish(body: PublishIn, request: Request = None):
         return payload
 
 
+class PublishDraftIn(PublishIn):
+    allow_save: StrictBool = True
+    model_config = ConfigDict(extra="forbid")
+    account_id: StrictInt = PydanticField(gt=0)
+    title: str = PydanticField(default="", max_length=20)
+    desc: str = PydanticField(default="", max_length=10000)
+    topics: str = PydanticField(default="", max_length=1000)
+    location: str = PydanticField(default="", max_length=60)
+    media_paths: list[str] = PydanticField(default_factory=list, max_length=9)
+    asset_ids: list[str] = PydanticField(default_factory=list, max_length=9)
+    demo_only: StrictBool = False
+
+
+class PublishApprovalIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    review_version: StrictInt = PydanticField(gt=0)
+    review_digest: str = PydanticField(pattern="^[a-f0-9]{64}$")
+
+
+def _review_account(session, account_id):
+    account = session.get(DouyinAccount, account_id)
+    if (not account or account.platform != "douyin" or account.status != "active"
+            or not (account.creator_storage_state or account.storage_state)):
+        raise HTTPException(422, "首版草稿仅支持已登录的抖音自有账号")
+    return account
+
+
+@app.post("/api/publish/drafts")
+async def create_publish_draft(body: PublishDraftIn, request: Request):
+    _require_submission_key(request)
+    with get_session() as session:
+        def create():
+            account = _review_account(session, body.account_id)
+            if body.visibility not in {"public", "friends", "private"}:
+                raise HTTPException(422, "可见范围不正确")
+            scheduled_at = _parse_when(body.scheduled_at, account.timezone_id)
+            from .operations_workflows import resolve_asset_paths
+            if bool(body.media_paths) == bool(body.asset_ids):
+                raise HTTPException(422, "media_paths 和 asset_ids 必须且只能选择一种")
+            paths, asset_demo = (resolve_asset_paths(session, body.asset_ids, body.media_type)
+                                 if body.asset_ids else (body.media_paths, False))
+            manifest = snapshot_media(paths, body.media_type, UPLOAD_DIR)
+            task = PublishTask(platform=account.platform, account_id=account.id,
+                media_type=body.media_type, title=body.title.strip(), desc=body.desc,
+                topics=body.topics, location=body.location, visibility=body.visibility,
+                allow_save=body.allow_save, scheduled_at=scheduled_at,
+                status="draft", review_required=True, demo_only=body.demo_only or asset_demo, media_manifest=json.dumps(manifest),
+                media_json=json.dumps([m["path"] for m in manifest]))
+            task.review_digest = content_digest(task)
+            session.add(task); session.flush()
+            return _publish_dict(task)
+        result, _ = submit_once(session, request=request, scope="publish:draft", body=body, create=create)
+        return result
+
+
+@app.get("/api/publish/{tid:int}")
+async def publish_status(tid: int):
+    with get_session() as session:
+        task = session.get(PublishTask, tid)
+        if task is None:
+            raise HTTPException(404, "发布任务不存在")
+        result = _publish_dict(task)
+        account = session.get(DouyinAccount, task.account_id) if task.account_id else None
+        result["account_name"] = account.nickname if account else "账号已删除"
+        result["media"] = [{"name": m["name"], "size": m["size"], "sha256": m["sha256"],
+                            "preview_url": f"/api/publish/{tid}/media/{i}"}
+                           for i, m in enumerate(json.loads(task.media_manifest))] if task.review_required else []
+        return result
+
+
+@app.get("/api/publish/{tid:int}/media/{index:int}")
+async def preview_draft_media(tid: int, index: int):
+    with get_session() as session:
+        task = session.get(PublishTask, tid)
+        manifest = json.loads(task.media_manifest) if task and task.review_required else []
+        if not 0 <= index < len(manifest):
+            raise HTTPException(404, "素材不存在")
+        path = Path(manifest[index]["path"])
+        if not path.resolve().is_relative_to((UPLOAD_DIR / "review-drafts").resolve()) or not path.is_file():
+            raise HTTPException(404, "素材不存在")
+        return FileResponse(path, headers={"Content-Disposition": "inline"})
+
+
+@app.post("/api/publish/{tid:int}/approve")
+async def approve_publish_draft(tid: int, body: PublishApprovalIn, request: Request):
+    _require_submission_key(request)
+    actor = _require_risk_admin(request)
+    with get_session() as session:
+        def approve():
+            task = session.get(PublishTask, tid)
+            if task is None:
+                raise HTTPException(404, "草稿不存在")
+            if (not task.review_required or task.status != "draft"
+                    or task.review_version != body.review_version
+                    or task.review_digest != body.review_digest
+                    or content_digest(task) != body.review_digest):
+                raise HTTPException(409, "草稿内容、版本或状态已变化，请重新打开核对")
+            if task.demo_only:
+                raise HTTPException(422, "验收演示草稿禁止真实发布，请用正式素材重新创建")
+            _review_account(session, task.account_id)
+            if not media_intact(task):
+                raise HTTPException(409, "素材已缺失或变化，请重新创建草稿")
+            if task.scheduled_at and task.scheduled_at < datetime.utcnow():
+                raise HTTPException(409, "预约时间已过，请编辑为新的时间或明确选择尽快发布")
+            task.status = "pending"; task.approved_at = datetime.utcnow()
+            task.approved_digest = task.review_digest; task.error = ""
+            session.add(task)
+            session.add(RiskAdminAudit(action="publish_draft_approved", account_id=task.account_id,
+                actor=actor, detail=json.dumps({"task_id": task.id, "version": task.review_version,
+                                               "digest": task.review_digest})))
+            session.flush()
+            return _publish_dict(task)
+        result, _ = submit_once(session, request=request, scope=f"publish:approve:{tid}", body=body, create=approve)
+        return result
+
+
 @app.put("/api/publish/{tid}")
 async def update_publish(tid: int, body: PublishUpdate):
     with get_session() as s:
+        s.connection().exec_driver_sql("BEGIN IMMEDIATE")
         t = s.get(PublishTask, tid)
         if not t:
             raise HTTPException(404)
         if t.status not in ("draft", "pending", "failed", "canceled"):
             raise HTTPException(400, f"任务状态为 {t.status},不可编辑")
+        if t.review_required and body.review_version != t.review_version:
+            raise HTTPException(409, "草稿版本已变化，请刷新后编辑")
         if t.scheduled_at and not t.scheduled_at_is_utc and "scheduled_at" not in body.model_fields_set:
             raise HTTPException(422, "请确认预约时间，或明确清空时间选择尽快发布")
         if body.account_id is not None:
@@ -10223,7 +10418,14 @@ async def update_publish(tid: int, body: PublishUpdate):
             account = s.get(DouyinAccount, t.account_id) if t.account_id else None
             t.scheduled_at = _parse_when(body.scheduled_at, account.timezone_id if account else "Asia/Shanghai")
             t.scheduled_at_is_utc = True
-        if t.status in ("draft", "failed", "canceled"):
+        if t.review_required:
+            t.status = "draft"
+            t.review_version += 1
+            t.approved_digest = ""; t.approved_at = None
+            t.review_digest = content_digest(t)
+            t.error = "修改后需要重新人工确认"
+            t.blocked_reason = ""; t.blocked_signal = ""; t.next_allowed_at = None
+        elif t.status in ("draft", "failed", "canceled"):
             t.status = "pending"
             t.error = ""
         s.add(t); s.commit(); s.refresh(t)
@@ -11405,7 +11607,7 @@ class BatchStopIn(BaseModel):
 @app.post("/api/task-queue/batch-stop")
 async def batch_stop_tasks(body: BatchStopIn):
     specs = {"collections": KeywordCollectionJob, "publishes": PublishTask,
-             "comments": CommentTask, "actions": AccountActionTask}
+             "comments": CommentTask, "actions": AccountActionTask, "syncs": SyncRequest}
     requested = {(item.queue_type, item.id) for item in body.items}
     stopped: list[dict] = []
     skipped: list[dict] = []
@@ -11437,6 +11639,10 @@ async def batch_stop_tasks(body: BatchStopIn):
                 row.current_step = "正在安全停止"
             elif row.status in {"pending", "draft", "failed", "partial"}:
                 row.status = "canceled"
+                if isinstance(row, SyncRequest):
+                    row.active_key = None
+                    row.blocked_reason = ""
+                    row.next_allowed_at = None
                 if hasattr(row, "cancel_requested"):
                     row.cancel_requested = True
                 if hasattr(row, "current_step"):
@@ -11662,7 +11868,7 @@ async def index():
                             'data-guide-base="/guide/"')
     # Version all local UI assets, including pre-paint appearance boot and CSS.
     try:
-        for asset in ("app.js", "submissions.js", "appearance.js", "appearance.css", "workspace-ui.js", "workbench.js", "workbench.css"):
+        for asset in ("app.js", "submissions.js", "appearance.js", "appearance.css", "workspace-ui.js", "workbench.js", "workbench.css", "wecom.js", "wecom-moments.js", "integrations-v9.js", "operations.js"):
             ver = int((WEB_DIR / asset).stat().st_mtime)
             html = html.replace(f"/static/{asset}", f"/static/{asset}?v={ver}")
     except Exception:
@@ -11678,4 +11884,15 @@ app.mount("/static", StaticFiles(directory=str(WEB_DIR)), name="static")
 
 @app.get("/health")
 async def health():
-    return {"status": "ok"}
+    from .delivery_workflows import config as delivery_config
+    with get_session() as session:
+        crm_mode=delivery_config(session).mode
+    return {"status": "ok", "hub_cli_protocol": "1.0",
+            "draft_review": True, "controlled_sync_queue": True,
+            "local_assets": True, "offline_leads": True, "crm_mode": crm_mode,
+            "video_backup_protocol": "1.0", "business_operations_protocol": "1.0",
+            "team_gateway_enabled": False, "automatic_external_delivery": False,
+            "wecom_readonly_protocol": "1.0", "wecom_automatic_polling": False,
+            "business_integrations_protocol":"1.0","typed_crm_fields":True,"backup_policy_plan_only":True,
+            "wecom_moments_protocol":"1.0","wecom_moments_automatic_submit":False,
+            "wecom_moments_manual_approval":True}

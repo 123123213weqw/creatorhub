@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 from datetime import datetime
 from pathlib import Path
 from typing import List, Tuple
@@ -161,62 +162,103 @@ async def _dump_radios(page) -> None:
         _log(f"枚举单选项失败: {e!r}")
 
 
-async def _choose_radio(page, label: str) -> bool:
-    """点一个单选项。**只走安全精确策略**,绝不 force / 不点任意祖先 ——
-    否则可能误点「继续添加/封面」等触发系统选图框的按钮,卡死自动化。"""
-    # 1) 无障碍 role=radio(Semi 给单选组件挂 role),用 check() 语义最稳
+async def _radio_selected(locator) -> bool:
+    """A successful click is not proof of selection. Prefer semantic state."""
     try:
-        loc = page.get_by_role("radio", name=label, exact=True)
-        if await loc.count():
-            await loc.first.scroll_into_view_if_needed(timeout=2000)
-            try:
-                await loc.first.check(timeout=2500)
-            except Exception:
-                await loc.first.click(timeout=2500)
-            _log(f"已选发布设置「{label}」(role)")
+        if await locator.is_checked(timeout=2000):
             return True
     except Exception:
         pass
-    # 2) 仅在 Semi 单选组件内、且整项文本恰等于 label 的元素上点(不碰其它任何东西)
     try:
+        if await locator.get_attribute('aria-checked', timeout=2000) == 'true':
+            return True
+        inputs = locator.locator('input[type="radio"]')
+        if await inputs.count() == 1:
+            return await inputs.first.is_checked(timeout=2000)
+    except Exception:
+        pass
+    return False
+
+
+async def _radio_for_label(page, label: str):
+    """Refuse ambiguous matches instead of choosing an arbitrary first item."""
+    try:
+        loc = page.get_by_role('radio', name=label, exact=True)
+        count = await loc.count()
+        if count == 1:
+            return loc.first
+        if count > 1:
+            return None
         radios = page.locator('label.semi-radio, .semi-radio, label[class*="radio"]')
-        n = await radios.count()
-        for i in range(n):
-            r = radios.nth(i)
+        matches = []
+        total = await radios.count()
+        if total > 64:
+            return None
+        for index in range(total):
+            candidate = radios.nth(index)
+            if ((await candidate.inner_text(timeout=2000)) or '').strip() == label:
+                matches.append(candidate)
+        return matches[0] if len(matches) == 1 else None
+    except Exception:
+        return None
+
+
+async def _choose_radio(page, label: str) -> bool:
+    """点一个单选项。**只走安全精确策略**,绝不 force / 不点任意祖先 ——
+    否则可能误点「继续添加/封面」等触发系统选图框的按钮,卡死自动化。"""
+    try:
+        loc = await _radio_for_label(page, label)
+        if loc is not None:
+            await loc.scroll_into_view_if_needed(timeout=2000)
             try:
-                txt = ((await r.inner_text()) or "").strip()
+                await loc.check(timeout=2500)
             except Exception:
-                continue
-            if txt == label:
-                await r.scroll_into_view_if_needed(timeout=2000)
-                await r.click(timeout=2000)
-                _log(f"已选发布设置「{label}」(semi-radio)")
+                await loc.click(timeout=2500)
+            if await _radio_selected(loc):
+                _log(f"已核对发布设置「{label}」的选中状态")
                 return True
     except Exception:
         pass
-    _log(f"⚠️ 未点中发布设置「{label}」(已安全跳过,不乱点)—— 打印页面实际可选项供校准:")
+    _log(f"未确认发布设置「{label}」；禁止继续发布。打印实际可选项供校准:")
     await _dump_radios(page)
     return False
 
 
-async def _apply_publish_settings(page, visibility: str, allow_save: bool) -> None:
-    """设置「谁可以看」「保存权限」。公开 / 允许为抖音默认值,非默认才点,减少误点。"""
-    vis_label = {"friends": "好友可见", "private": "仅自己可见"}.get(visibility, "")
-    if vis_label:                       # public=默认,不动
-        await _choose_radio(page, vis_label)
-    if not allow_save:                  # 允许=默认,只在「不允许」时点
-        await _choose_radio(page, "不允许")
+_VISIBILITY_LABELS = {'public': '公开', 'friends': '好友可见', 'private': '仅自己可见'}
+
+
+async def _publish_settings_confirmed(page, visibility: str, allow_save: bool) -> bool:
+    if visibility not in _VISIBILITY_LABELS or type(allow_save) is not bool:
+        return False
+    for label in (_VISIBILITY_LABELS[visibility], '允许' if allow_save else '不允许'):
+        loc = await _radio_for_label(page, label)
+        if loc is None or not await _radio_selected(loc):
+            return False
+    return True
+
+
+async def _apply_publish_settings(page, visibility: str, allow_save: bool) -> bool:
+    """Fail closed: defaults and successful clicks cannot substitute for state."""
+    if visibility not in _VISIBILITY_LABELS or type(allow_save) is not bool:
+        return False
+    for label in (_VISIBILITY_LABELS[visibility], '允许' if allow_save else '不允许'):
+        if not await _choose_radio(page, label):
+            return False
+    return await _publish_settings_confirmed(page, visibility, allow_save)
 
 
 async def publish_douyin(mgr: BrowserManager, identity: Identity,
                          storage_state_json: str, media_type: str, title: str,
                          desc: str, media_paths: List[str], topics: str = "",
                          visibility: str = "public", allow_save: bool = True,
-                         headed: bool = True, timeout_seconds: int = 180
+                         headed: bool = True, timeout_seconds: int = 180,
+                         on_submit=None
                          ) -> Tuple[bool, str, str]:
     """发布一条抖音作品。返回 (ok, result_url, error)。
     storage_state_json 仅用于校验(实际登录态在该账号持久 profile 里)。
     visibility: public 公开 | friends 好友可见 | private 仅自己可见;allow_save: 是否允许他人保存。"""
+    if visibility not in _VISIBILITY_LABELS or type(allow_save) is not bool:
+        return False, "", "publish_settings_invalid:发布可见范围或保存权限无效"
     files = [str(Path(p)) for p in media_paths if p and Path(p).exists()]
     if not files:
         return False, "", "没有可用的本地媒体文件(路径不存在)"
@@ -243,6 +285,7 @@ async def publish_douyin(mgr: BrowserManager, identity: Identity,
         pass
 
     ok, result_url, error = False, "", ""
+    submitted = False
     try:
         url = IMAGE_URL if media_type == "images" else UPLOAD_URL
         _log(f"打开发布页 {url} (media_type={media_type}, files={len(files)})")
@@ -272,15 +315,18 @@ async def publish_douyin(mgr: BrowserManager, identity: Identity,
         await page.wait_for_timeout(1500)
 
         if title:
-            await _fill_first(page, _TITLE_SEL, title.strip()[:30])
+            if not await _fill_first(page, _TITLE_SEL, title.strip()[:30]):
+                return False, "", "publish_content_unconfirmed:未能填入指定标题，未提交"
             await page.wait_for_timeout(400)
         if body:
             if not await _fill_first(page, _DESC_SEL, body):
-                _log("警告:未能填入简介(选择器可能改版)")
+                return False, "", "publish_content_unconfirmed:未能填入指定简介，未提交"
         await page.wait_for_timeout(800)
 
         # 发布设置:谁可以看 / 保存权限(公开、允许为默认,仅非默认才点)
-        await _apply_publish_settings(page, visibility, allow_save)
+        if not await _apply_publish_settings(page, visibility, allow_save):
+            await _dump(page, "settings_unconfirmed")
+            return False, "", "publish_settings_unconfirmed:未确认可见范围或保存权限，未提交"
         await page.wait_for_timeout(600)
 
         # 轮询等「发布」按钮可用(视频未处理完时按钮 disabled),最多 ~90s
@@ -301,14 +347,24 @@ async def publish_douyin(mgr: BrowserManager, identity: Identity,
             await btn.scroll_into_view_if_needed(timeout=3000)
         except Exception:
             pass
+        # Upload/transcode rerenders may reset a previously selected setting.
+        # Check again immediately before the only final submit click.
+        if not await _publish_settings_confirmed(page, visibility, allow_save):
+            await _dump(page, "settings_changed_before_submit")
+            return False, "", "publish_settings_unconfirmed:提交前发布设置发生变化或不可验证，未提交"
+        if on_submit is not None:
+            result = on_submit()
+            if inspect.isawaitable(result):
+                await result
+        submitted = True
         try:
             await btn.click(timeout=5000)
             _log("已点击发布按钮")
         except Exception:
-            # 兜底:用文本选择器再点一次
-            if not await _click_first(page, _PUBLISH_BTN, timeout=4000):
-                await _dump(page, "clickfail")
-                return False, "", "发布按钮点击失败(可能被弹层遮挡/需补封面)。已存诊断截图。"
+            # A timeout may occur after the platform accepted the click. Never
+            # click again with another selector or describe it as not sent.
+            await _dump(page, "click_unknown")
+            return False, "", "write_uncertain:发布点击结果未知，需到平台核对；禁止自动再次点击"
 
         # 成功判定 + 风控验证等待:抖音点发布后常弹「短信验证码/扫码」要本人操作,
         # 这时必须把弹出的窗口留给用户手动完成,故轮询等待、给足时间(默认最多 5 分钟)。
@@ -348,10 +404,12 @@ async def publish_douyin(mgr: BrowserManager, identity: Identity,
             await _dump(page, "exception")
         except Exception:
             pass
-        error = f"发布异常: {e!r}"
+        error = "write_uncertain:发布已尝试提交，发生异常，需到平台核对" if submitted else f"发布异常: {e!r}"
     finally:
         try:
             await ctx.close()
         except Exception:
             pass
+    if submitted and not ok and not error.startswith('write_uncertain:'):
+        error = 'write_uncertain:' + error
     return ok, result_url, error

@@ -1,0 +1,252 @@
+{
+  "hub_cli_capabilities": {
+    "command": "capabilities",
+    "description": "查询机器人当前可调用的CLI只读能力和已安装CLI版本；不会授予权限。",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  "hub_cli_doctor": {
+    "command": "doctor",
+    "description": "检查本机Hub、当前CLI及各扩展是否就绪；不会触发平台访问。",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  "hub_cli_works_list": {
+    "command": "works.list",
+    "description": "查看指定账号在Hub内已存作品的编号和计数，不含正文，不抓取平台。",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "account_id": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "page": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000
+        },
+        "page_size": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20
+        }
+      },
+      "required": [
+        "account_id"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "hub_cli_assets_list": {
+    "command": "assets.list",
+    "description": "查看已登记素材编号、类型、大小和演示标记；不返回文件名、路径或素材内容。",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  "hub_cli_publish_list": {
+    "command": "publish.list",
+    "description": "查看Hub中的发布任务编号、状态和审核标记，不含标题、正文和素材。",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "platform": {
+          "type": "string",
+          "enum": [
+            "all",
+            "douyin",
+            "xhs",
+            "kuaishou",
+            "shipinhao",
+            "tiktok"
+          ]
+        },
+        "page": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000
+        },
+        "page_size": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  "hub_cli_publish_status": {
+    "command": "publish.status",
+    "description": "查看某个发布任务状态，不批准、排队或执行发布。",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "task_id": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "task_id"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "hub_cli_backup_status": {
+    "command": "backup.status",
+    "description": "查看备份连接/授权及可用性摘要，不传输、删除或恢复文件。",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  "hub_cli_backup_list": {
+    "command": "backup.list",
+    "description": "查看已有备份操作编号和执行状态摘要，不包含清单或文件名。",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  "hub_cli_backup_show": {
+    "command": "backup.show",
+    "description": "查看指定备份操作的状态、数量和校验标记，不读文件内容。",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "operation_id": {
+          "type": "string",
+          "pattern": "^vbak_[a-f0-9]{32}$"
+        }
+      },
+      "required": [
+        "operation_id"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "hub_cli_backup_policy": {
+    "command": "backup.policy",
+    "description": "查看本机备份策略计划标记，不创建备份或自动任务。",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  "hub_cli_wecom_status": {
+    "command": "wecom.status",
+    "description": "只读Hub企微数量缓存和时间，不访问腾讯，不读客户或聊天。",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  "hub_cli_wecom_business_status": {
+    "command": "wecom.business-status",
+    "description": "只读Hub已有企微客户群/群发/朋友圈摘要缓存，不刷新平台，不读聊天。",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  "hub_cli_wecom_moments_list": {
+    "command": "wecom.moments-list",
+    "description": "只读Hub客户朋友圈发表任务的编号、状态、范围数量和时间。优先用此工具查询朋友圈任务，再按编号查状态；任务创建不等于已发表。",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  "hub_cli_wecom_moments_status": {
+    "command": "wecom.moments-status",
+    "description": "只读指定Hub朋友圈任务的创建与成员发表状态。不重新创建，不查询腾讯，不取客户标识或正文；published不等于客户已读。",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "task_id": {
+          "type": "string",
+          "pattern": "^wecom_moment_[a-f0-9]{32}$"
+        }
+      },
+      "required": [
+        "task_id"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "hub_cli_wecom_moments_binding": {
+    "command": "wecom.moments-binding",
+    "description": "只读Hub的单一成员范围核对是否存在/过期，不返回成员或客户标签ID，不刷新。",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  "hub_cli_crm_preflight_status": {
+    "command": "crm.preflight-status",
+    "description": "查看客户表字段预检的既有状态和数量，不读记录、不读字段名、不写入或通知。",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  "hub_cli_operations_readiness": {
+    "command": "operations.readiness",
+    "description": "查看Hub业务工作流是否就绪和缺项数量，不取人员、客户或正文。",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  "hub_cli_operations_report": {
+    "command": "operations.report",
+    "description": "查看Hub已有业务目标/内容/投递的汇总计数与状态，不取明细正文。",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  "hub_cli_operations_handoff": {
+    "command": "operations.handoff",
+    "description": "查看Hub交付验收的结构化标记和计数；不含路径和人工说明，不触发外部访问。",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    }
+  }
+}

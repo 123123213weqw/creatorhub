@@ -132,3 +132,8 @@ chmod +x start.sh
 ## 使用须知
 
 本项目用于技术学习和个人内容管理，不提供账号、Cookie、代理或平台数据。使用时请遵守目标平台规则及所在地法律法规，并尊重内容版权和个人隐私。
+
+
+## Huilima 本机集成扩展
+
+企微客户/业务记录摘要、客户朋友圈成员任务、CLI 及飞书 AI 的功能分支说明见 [接入与验收指南](guide/huilima-integration.md)。CLI 见 [clients/creatorhub-cli](clients/creatorhub-cli/README.md)，私聊机器人见 [integrations/feishu-bot](integrations/feishu-bot/README.md)。真实写入需明确确认，源码中不包含任何真实账号、Cookie、密钥或业务数据库。
