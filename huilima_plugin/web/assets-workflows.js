@@ -117,7 +117,7 @@ globalThis.HuilimaPluginUI = Object.freeze({
   pageNames: Object.freeze(['wecom']),
   pageMeta(name) {
     if (name !== 'wecom') return;
-    return {title: '企业微信', desc: '客户朋友圈草稿、人工审核和发表结果，在独立的企业工作区管理。', platform: '企业微信', kicker: 'Huilima 独立工作区'};
+    return {title: '企业微信', desc: '准备朋友圈内容，交给成员发表，随时查看进度。', platform: '企业微信', kicker: '客户运营'};
   },
   pageContext(name) { return HuilimaPluginUI.pageMeta(name); },
   openWorkspace(name) { if (name === 'wecom') switchTab('wecom', true); },

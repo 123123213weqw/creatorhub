@@ -16,17 +16,24 @@
     <button id="huilima-moments-tab" class="tab active" role="tab" aria-selected="true" aria-controls="wcm-panel" type="button">客户朋友圈</button>
   </div>
   <div class="card huilima-moments-workspace">
-    <div class="card-head"><span class="card-ic"><svg aria-hidden="true"><use href="#i-send"/></svg></span><h2>企微客户朋友圈 <span class="sub">Huilima 独立工作区</span></h2></div>
-    <div class="huilima-moments-scope">企业级 · 不绑定抖音等平台账号 · 创建任务后仍需成员在企微发表</div>
+    <div class="card-head"><span class="card-ic"><svg aria-hidden="true"><use href="#i-send"/></svg></span><h2>发布客户朋友圈 <span class="sub">先审核，再交给成员发表</span></h2></div>
+    <div class="huilima-moments-scope">提交后，还需要成员在企业微信手机端确认发表，不会直接发布。</div>
     <div id="wcm-panel" role="tabpanel" aria-labelledby="huilima-moments-tab">
-          <p class="hint">企业级独立工作区，不随抖音等平台账号切换。先建本地草稿，再由本机管理员审核并单次提交；创建任务不等于已发表，成员仍须在企微确认。必须指定唯一成员和企业客户标签，不默认全体客户。支持纯文字、最多9张JPG/PNG或一个≤10MB且≤30秒的MP4；不自动上传、重试或轮询，不采集普通群聊天。</p>
+          <p class="hint">准备内容 → 审核内容和可见客户 → 提交给成员 → 成员在手机上发表。</p>
+          <details class="huilima-moments-help"><summary>首次使用与内容要求</summary>
+            <p>首次使用，请先确认发表成员。每条朋友圈需指定一名成员，并按客户标签选择可见客户，不会默认发给所有客户。</p>
+            <p>支持纯文字、最多9张 JPG/PNG 图片，或1个不超过10MB、30秒的 MP4 视频，图片和视频不能混用。</p>
+            <p>这里展示已保存的进度，不会持续向企业微信查询。需要最新结果时，请点“查询发表进度”。这里不读取普通聊天消息。</p>
+            <p>保存草稿或确认成员时没有反馈，可用“找回未完成操作”查看上次结果；已提交给成员的内容，请在列表里查询进度，不要再次提交。</p>
+          </details>
           <div class="row" style="gap:8px;flex-wrap:wrap">
-            <button class="ghost" type="button" onclick="wcmLoad()">查看本地草稿 / 状态</button>
-            <button class="ghost" type="button" onclick="wcmPreflight()">手动核对唯一成员</button>
-            <button type="button" onclick="wcmDraft()">新建本地朋友圈草稿</button>
-            <button class="ghost" type="button" onclick="wcmReceipt()">核对原请求回执</button>
+            <button class="ghost" type="button" onclick="wcmLoad()">查看草稿和进度</button>
+            <button class="ghost" type="button" onclick="wcmPreflight()">确认发表成员</button>
+            <button type="button" onclick="wcmDraft()">新建朋友圈</button>
+            <button class="ghost" type="button" onclick="wcmReceipt()">找回未完成操作</button>
           </div>
-          <p id="wcm-status" role="status">尚未读取；点击“查看本地草稿 / 状态”只读取本机缓存。</p>
+          <p id="wcm-status" role="status">点击“查看草稿和进度”，查看已保存的内容。</p>
+          <details id="wcm-status-details" hidden><summary>查看问题详情</summary><pre id="wcm-status-technical" style="white-space:pre-wrap;overflow-wrap:anywhere"></pre></details>
           <div id="wcm-list"></div>
     </div>
   </div>

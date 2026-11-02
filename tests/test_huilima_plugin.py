@@ -155,3 +155,17 @@ def test_host_keeps_minimal_explicit_plugin_workspace_hooks():
  assert 'if (leavingExtensionPage) switchTab("hub", true)' in js
  assert 'HuilimaPluginUI?.pageContext?.(name, HUB_TAB)' in js
  assert 'wecom/moments' not in js
+
+
+def test_customer_facing_copy_is_plain_but_keeps_essential_limits():
+ html=(PLUGIN/'web/moments.html').read_text()
+ for label in ['查看草稿和进度','确认发表成员','新建朋友圈','找回未完成操作','不会直接发布','不会默认发给所有客户','10MB','30秒']:
+  assert label in html
+ for developer_label in ['本地缓存','原请求回执','单次提交','平台写权限仍须真实验收','Huilima 独立工作区']:
+  assert developer_label not in html
+ js=(PLUGIN/'web/wecom-moments.js').read_text()
+ assert "card.append(details('查看处理记录'" in js
+ assert '成员已发表（不代表客户已阅读）' in js
+ assert '不撤回企业微信中的任务' in js
+ assert '由管理员提供' in js
+ assert "diagnostic('error'" in js

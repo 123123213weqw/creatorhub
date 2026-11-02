@@ -1,16 +1,16 @@
 /* Offline DOM tests, no real browser, platform, credentials or timer. */
 const test=require('node:test'), assert=require('node:assert/strict'), vm=require('node:vm'), fs=require('node:fs'), path=require('node:path');
 const source=fs.readFileSync(path.join(__dirname,'../huilima_plugin/web/wecom-moments.js'),'utf8');
-function fixture({token='',preview=false,handler=async()=>({items:[]})}={}){
+function fixture({token='',preview=false,status=200,handler=async()=>({items:[]})}={}){
  const calls=[],store=new Map(),nodes={};
  class Node{
   constructor(tag='div'){this.tag=tag;this.children=[];this.elements={};this.dataset={};this.style={};this.disabled=false;this.checked=false;this.value='';}
   append(...items){for(const n of items){this.children.push(n);if(n.name)this.elements[n.name]=n;if(this.tag==='select'&&this.children.length===1)this.value=n.value;}}
   replaceChildren(){this.children=[];this.elements={};} showModal(){this.open=true;} close(){this.open=false;}
  }
- for(const id of ['wcm-status','wcm-list','wcm-dialog','wcm-form','wcm-preview','wcm-title','wcm-error','wcm-save'])nodes[id]=new Node();
+ for(const id of ['wcm-status','wcm-list','wcm-dialog','wcm-form','wcm-preview','wcm-title','wcm-error','wcm-save','wcm-status-details','wcm-status-technical','wcm-error-details','wcm-error-technical'])nodes[id]=new Node();
  const context={OPS_TOKEN:token,document:{documentElement:{dataset:{preview:String(preview)}},getElementById:id=>nodes[id],createElement:tag=>new Node(tag)},
-  fetch:async(url,opts)=>{calls.push([url,opts]);const value=await handler(url,opts);return {ok:true,json:async()=>value};},
+  fetch:async(url,opts)=>{calls.push([url,opts]);const value=await handler(url,opts);return {ok:status>=200&&status<300,status,json:async()=>value};},
   sessionStorage:{setItem:(k,v)=>store.set(k,v),getItem:k=>store.get(k),removeItem:k=>store.delete(k)},
   crypto:{randomUUID:()=> '00000000-0000-4000-8000-000000000001'},window:{},JSON,Error,encodeURIComponent};
  vm.runInNewContext(source,context);return {...context.window,nodes,calls,store};
@@ -22,7 +22,7 @@ const submit=f=>f.nodes['wcm-form'].onsubmit({preventDefault(){}});
 test('initial load makes no requests or timers; view only cached GETs',async()=>{
  const f=fixture({handler:async u=>u.endsWith('/binding')?binding:{items:[row]}});assert.equal(f.calls.length,0);
  await f.wcmLoad();assert.equal(f.calls.length,2);assert.ok(f.calls.every(c=>c[1].method==='GET'));
- assert.equal(f.nodes['wcm-list'].children[0].children[0].textContent,'fixture · 本地草稿');
+ assert.equal(f.nodes['wcm-list'].children[0].children[0].textContent,'fixture · 草稿');
 });
 test('team and static preview never fall back to local owner',async()=>{
  for(const opts of [{token:'cht_fixture'},{preview:true}]){const f=fixture(opts);
@@ -49,7 +49,7 @@ test('creation unknown is not auto retried or re-approved',async()=>{
  const f=fixture({handler:async(u,o)=>o.method==='GET'?row:{status:'unknown'}});await f.wcmSubmit(id);
  f.nodes['wcm-form'].elements.ack.checked=true;await submit(f);
  assert.equal(f.calls.filter(c=>c[0].endsWith('/submit')).length,1);
- assert.match(f.nodes['wcm-error'].textContent,/禁止重发/);assert.equal(f.nodes['wcm-dialog'].open,true);
+ assert.match(f.nodes['wcm-error'].textContent,/不要再次提交/);assert.equal(f.nodes['wcm-dialog'].open,true);
 });
 test('receipt recovery is local GET not a repeated POST',async()=>{
  const f=fixture({handler:async()=>({status:'ready'})});
@@ -64,4 +64,39 @@ test('new draft retains first select option instead of sending an empty media ty
  await submit(f);const post=f.calls.find(c=>c[0].endsWith('/drafts'));assert.ok(post);
  assert.equal(JSON.parse(post[1].body).media_type,'text');
  assert.equal(f.calls.filter(c=>c[0].endsWith('/submit')).length,0);
+});
+
+
+test('customer list keeps technical IDs in closed processing details',async()=>{
+ const f=fixture({handler:async u=>u.endsWith('/binding')?binding:{items:[{...row,status:'published'}]}});
+ await f.wcmLoad();const card=f.nodes['wcm-list'].children[0];
+ assert.match(card.children[0].textContent,/成员已发表（不代表客户已阅读）/);
+ assert.ok(!card.children[1].textContent.includes(row.id));
+ const detail=card.children.find(n=>n.tag==='details');assert.ok(detail);assert.ok(!detail.open);
+ assert.match(detail.children[1].textContent,new RegExp(row.id));
+ assert.ok(card.children.some(n=>n.tag==='button'&&n.textContent==='查询发表进度'));
+});
+
+test('review still exposes exact member and customer scope but collapses checksums',async()=>{
+ const f=fixture({handler:async()=>row});await f.wcmShow(id);
+ const children=f.nodes['wcm-preview'].children;
+ assert.ok(children[0].textContent.includes('fixture-member')&&children[0].textContent.includes('etFIXTURE'));
+ assert.ok(!children[0].textContent.includes(row.digest));
+ assert.equal(children[1].tag,'details');assert.ok(!children[1].open);assert.ok(children[1].children[1].textContent.includes(row.digest));
+});
+
+test('HTTP technical errors are separated from customer-facing action guidance',async()=>{
+ const f=fixture({status:403,handler:async()=>({detail:'fixture_forbidden_code'})});await f.wcmLoad();
+ assert.equal(f.nodes['wcm-status'].textContent,'当前身份没有操作权限，请联系管理员。');
+ assert.ok(!f.nodes['wcm-status'].textContent.includes('fixture_forbidden_code'));
+ assert.equal(f.nodes['wcm-status-details'].hidden,false);assert.equal(f.nodes['wcm-status-details'].open,false);
+ assert.match(f.nodes['wcm-status-technical'].textContent,/HTTP 403.*fixture_forbidden_code/);
+ assert.equal(f.calls.length,1);
+});
+
+test('unknown status is not presented as success and remains available in details',async()=>{
+ const f=fixture({handler:async u=>u.endsWith('/binding')?binding:{items:[{...row,status:'fixture_new_state'}]}});
+ await f.wcmLoad();const card=f.nodes['wcm-list'].children[0];
+ assert.equal(card.children[0].textContent,'fixture · 进度待确认');
+ assert.ok(card.children.find(n=>n.tag==='details').children[1].textContent.includes('fixture_new_state'));
 });
